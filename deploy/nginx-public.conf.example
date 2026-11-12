@@ -1,0 +1,37 @@
+# OPTIONAL public HTTPS exposure. Not installed. Only use this after deciding you want the
+# dashboard reachable from the internet; a private Tailscale address is the safer default.
+#
+#   1. Pick a hostname that resolves to this server (same sslip.io pattern as the other sites works).
+#   2. sudo certbot certonly --nginx -d <hostname>
+#   3. Copy to /etc/nginx/sites-available/sonic-jobs, replace <hostname>, enable, `sudo nginx -t && sudo systemctl reload nginx`
+#   4. Set SONIC_PUBLIC_BASE_URL=https://<hostname> in .env and restart the services.
+limit_req_zone $binary_remote_addr zone=sonic_login:10m rate=10r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <hostname>;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name <hostname>;
+    ssl_certificate     /etc/letsencrypt/live/<hostname>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<hostname>/privkey.pem;
+    client_max_body_size 6m;
+
+    location = /api/auth/login {
+        limit_req zone=sonic_login burst=5 nodelay;
+        proxy_pass http://127.0.0.1:8790;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8790;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

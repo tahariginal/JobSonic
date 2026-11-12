@@ -1,0 +1,29 @@
+[Unit]
+Description=SONIC JOBS API and dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=T4
+Group=T4
+WorkingDirectory=/home/ubuntu/works/sonic-jobs/backend
+EnvironmentFile=/home/ubuntu/works/sonic-jobs/.env
+ExecStartPre=/home/ubuntu/works/sonic-jobs/backend/.venv/bin/alembic upgrade head
+ExecStart=/home/ubuntu/works/sonic-jobs/backend/.venv/bin/uvicorn app.main:app --host ${SONIC_HOST} --port ${SONIC_PORT} --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --log-level info
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+UMask=0077
+MemoryMax=600M
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sonic-jobs-api
+
+[Install]
+WantedBy=multi-user.target

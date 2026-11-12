@@ -1,0 +1,22 @@
+<!doctype html><html><head><title>AI Agent Engineer @ Initech</title></head><body>
+<div id="root"></div>
+<script>
+// rendered client-side after a delay, like a single-page app
+setTimeout(function () {
+  document.getElementById('root').innerHTML = `
+  <form method="POST" action="/submit?mode=__MODE__" enctype="multipart/form-data">
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_name">Name</label>
+      <input id="_systemfield_name" name="_systemfield_name" type="text" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_email">Email</label>
+      <input id="_systemfield_email" name="_systemfield_email" type="email" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_resume">Resume</label>
+      <input id="_systemfield_resume" name="_systemfield_resume" type="file" required></div>
+    <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="q_li">LinkedIn</label>
+      <input id="q_li" name="q_li" type="text"></div>
+    <fieldset class="ashby-application-form-field-entry"><legend class="ashby-application-form-question-title">Are you open to relocation? *</legend>
+      <label><input type="radio" name="q_reloc" value="Yes">Yes</label><label><input type="radio" name="q_reloc" value="No">No</label></fieldset>
+    <div class="ashby-application-form-field-entry"><label><input type="checkbox" name="q_privacy" id="q_privacy" required> I agree to the privacy policy</label></div>
+    <button type="submit">Submit Application</button>
+  </form>`;
+}, 400);
+</script></body></html>

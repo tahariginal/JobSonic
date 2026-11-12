@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #09090a;
+  --color-surface: #111113;
+  --color-raised: #17171a;
+  --color-hover: #1e1e22;
+  --color-line: #26262b;
+  --color-line-strong: #34343b;
+  --color-ink: #f4f4f5;
+  --color-ink-2: #b4b4bd;
+  --color-ink-3: #7c7c87;
+  --color-accent: #ffd60a;
+  --color-accent-dim: #c9a800;
+  --color-accent-ink: #0a0a0b;
+  /* chart + status colours: validated on the dark surface (see docs/ARCHITECTURE.md#charts) */
+  --color-chart: #c98500;
+  --color-good: #199e70;
+  --color-warn: #d95926;
+  --color-info: #3987e5;
+  --color-bad: #e66767;
+  --color-unknown: #9085e9;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --radius-card: 14px;
+  --animate-in: fade-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-slide: slide-in 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-up: slide-up 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+  @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @keyframes slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+  @keyframes slide-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+}
+
+html { color-scheme: dark; background: var(--color-bg); }
+body { background: var(--color-bg); color: var(--color-ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; font-feature-settings: "ss01", "cv11"; }
+* { scrollbar-width: thin; scrollbar-color: #2e2e35 transparent; }
+::selection { background: color-mix(in srgb, var(--color-accent) 35%, transparent); }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 6px; }
+.tabular { font-variant-numeric: tabular-nums; }
+.pulse-dot { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.skeleton { background: linear-gradient(90deg, #17171a 0%, #202024 50%, #17171a 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 8px; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

@@ -1,0 +1,12 @@
+[Unit]
+Description=SONIC JOBS database and documents backup
+
+[Service]
+Type=oneshot
+User=T4
+Group=T4
+WorkingDirectory=/home/ubuntu/works/sonic-jobs/backend
+EnvironmentFile=/home/ubuntu/works/sonic-jobs/.env
+ExecStart=/home/ubuntu/works/sonic-jobs/backend/.venv/bin/python -m app.backup
+UMask=0077
+SyslogIdentifier=sonic-jobs-backup

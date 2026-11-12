@@ -1,0 +1,34 @@
+[Unit]
+Description=SONIC JOBS background worker (discovery, forms, email)
+After=network-online.target sonic-jobs-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=T4
+Group=T4
+WorkingDirectory=/home/ubuntu/works/sonic-jobs/backend
+EnvironmentFile=/home/ubuntu/works/sonic-jobs/.env
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/works/sonic-jobs/backend/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=5
+# give a running browser time to close cleanly
+TimeoutStopSec=45
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+UMask=0077
+MemoryMax=1500M
+CPUQuota=150%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sonic-jobs-worker
+
+[Install]
+WantedBy=multi-user.target

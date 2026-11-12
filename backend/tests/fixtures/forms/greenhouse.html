@@ -1,0 +1,24 @@
+<!doctype html><html><head><title>Job Application for Graduate Software Engineer at Globex</title></head><body>
+<form id="application-form" method="POST" action="/submit" enctype="multipart/form-data">
+  <div class="field"><label for="first_name">First Name<span>*</span></label><input id="first_name" type="text" aria-required="true"></div>
+  <div class="field"><label for="last_name">Last Name<span>*</span></label><input id="last_name" type="text" aria-required="true"></div>
+  <div class="field"><label for="email">Email<span>*</span></label><input id="email" type="text" aria-required="true"></div>
+  <div class="field"><label for="phone">Phone</label><input id="phone" type="tel"></div>
+  <div class="field file-upload"><div class="label" id="resume-label">Resume/CV*</div>
+    <button type="button">Attach</button><input id="resume" type="file" style="display:none" aria-labelledby="resume-label"></div>
+  <div class="field"><label for="question_101">LinkedIn Profile</label><input id="question_101" type="text"></div>
+  <div class="field"><label for="question_102">Website</label><input id="question_102" type="text"></div>
+  <div class="field"><label for="question_103">Why do you want to work at Globex?<span>*</span></label><textarea id="question_103" aria-required="true"></textarea></div>
+  <div class="field"><label for="question_104">Do you require visa sponsorship?<span>*</span></label>
+    <select id="question_104" aria-required="true"><option value="">Select...</option><option value="1">Yes</option><option value="0">No</option></select></div>
+  <div class="field"><label for="gender">Gender</label>
+    <select id="gender"><option value="">Select...</option><option>Male</option><option>Female</option><option>Decline To Self Identify</option></select></div>
+  <div class="recaptcha"><div class="grecaptcha-badge" style="width:1px;height:1px"></div></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+// like the real site: fields without name attributes are serialised by script
+document.getElementById('application-form').addEventListener('submit', function (e) {
+  for (const el of this.querySelectorAll('input[id],textarea[id],select[id]')) if (!el.name) el.name = el.id;
+});
+</script></body></html>

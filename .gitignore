@@ -1,0 +1,15 @@
+.env
+.env.*
+data/
+backend/.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/test-results/
+frontend/playwright-report/
+*.log
+e2e/.auth.json
+*.tsbuildinfo
