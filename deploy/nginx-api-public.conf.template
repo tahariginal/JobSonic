@@ -1,0 +1,72 @@
+# SONIC JOBS API: public HTTPS in front of the backend, which listens on 127.0.0.1:8790 only.
+# Installed by deploy/enable-public-api.sh (do not copy by hand; __HOST__ is filled in by the script).
+#
+#   browser -> https://<dashboard>.vercel.app/api/*   (Vercel rewrite, same origin for the session cookie)
+#           -> https://__HOST__/api/*                 (this site)
+#           -> http://127.0.0.1:8790/api/*
+#
+# Only /api/ is forwarded. The dashboard pages are served by Vercel, so everything else answers 404.
+# Own file and own certificate: it does not touch the other sites on this server.
+# To remove: deploy/enable-public-api.sh --remove
+
+limit_req_zone $binary_remote_addr zone=sonic_jobs_login:10m rate=10r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __HOST__;
+    server_tokens off;
+
+    # Let's Encrypt HTTP-01 challenge (shared webroot on this server).
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+#__TLS__ server {
+#__TLS__     listen 443 ssl;
+#__TLS__     listen [::]:443 ssl;
+#__TLS__     server_name __HOST__;
+#__TLS__     server_tokens off;
+#__TLS__
+#__TLS__     ssl_certificate     /etc/letsencrypt/live/__HOST__/fullchain.pem;
+#__TLS__     ssl_certificate_key /etc/letsencrypt/live/__HOST__/privkey.pem;
+#__TLS__     ssl_protocols TLSv1.2 TLSv1.3;
+#__TLS__     ssl_prefer_server_ciphers off;
+#__TLS__     ssl_session_timeout 1d;
+#__TLS__     ssl_session_tickets off;
+#__TLS__
+#__TLS__     # CV uploads are limited to 5 MB by the API.
+#__TLS__     client_max_body_size 6m;
+#__TLS__     client_header_timeout 30s;
+#__TLS__     client_body_timeout 60s;
+#__TLS__
+#__TLS__     proxy_http_version 1.1;
+#__TLS__     proxy_set_header Host $host;
+#__TLS__     proxy_set_header Connection "";
+#__TLS__     # The API reads the caller's address from the first entry, for the sign-in limiter and the audit log.
+#__TLS__     # Vercel sets it to the real visitor. A direct caller can fake it, so sign-in is also limited here by
+#__TLS__     # the real peer address.
+#__TLS__     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#__TLS__     proxy_set_header X-Forwarded-Proto https;
+#__TLS__
+#__TLS__     location = /api/auth/login {
+#__TLS__         limit_req zone=sonic_jobs_login burst=5 nodelay;
+#__TLS__         proxy_pass http://127.0.0.1:8790;
+#__TLS__     }
+#__TLS__
+#__TLS__     location /api/ {
+#__TLS__         proxy_pass http://127.0.0.1:8790;
+#__TLS__         proxy_read_timeout 120s;
+#__TLS__     }
+#__TLS__
+#__TLS__     location / {
+#__TLS__         return 404;
+#__TLS__     }
+#__TLS__ }

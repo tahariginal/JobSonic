@@ -52,6 +52,20 @@ Template: `deploy/nginx-public.conf.example`. Authentication, CSRF protection, r
 security headers are in place, but a private address is the safer default for a system holding
 your CV and application history. Nothing was changed in nginx or DNS.
 
+### D. Dashboard on Vercel, API on this server (public, your decision)
+
+The pages are hosted by Vercel and `/api/*` is forwarded to this server, so the backend, database
+and worker stay here. Only `/api/` is exposed, behind HTTPS and the sign-in.
+
+1. On this server: `./deploy/enable-public-api.sh` (adds one nginx site and a certificate, then
+   prints `API_ORIGIN=https://...`). `--status` shows it, `--remove` closes it again.
+2. In Vercel: import the repository with Root Directory `frontend` and the environment variable
+   `SONIC_API_ORIGIN` set to that value.
+3. `./deploy/enable-public-api.sh --dashboard-url https://<project>.vercel.app`
+
+`host_front_back.md` at the repository root is a ready prompt that makes a Claude Code session on
+your own computer do these steps. The login page becomes public, so keep the password long and random.
+
 ## First sign-in
 
 Username `admin`. The generated password is in `data/initial-credentials.txt` (owner-only).
