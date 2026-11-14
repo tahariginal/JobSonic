@@ -203,3 +203,60 @@ def test_manual_discovery_run_is_queued_once(client, db):
     assert client.post("/api/discovery/run", json={}).status_code == 200
     assert client.post("/api/discovery/run", json={}).status_code == 409
     assert db.query(Task).filter_by(type="discovery").count() == 1
+
+
+def test_account_change_revokes_other_sessions(client, user, db):
+    from app.models import User
+    from app.security import verify_password
+    other = TestClient(app)
+    other.post("/api/auth/login", json={"username": "admin", "password": "correct horse battery"})
+    r = client.put("/api/auth/account", json={
+        "username": "new-admin", "current_password": "correct horse battery",
+        "new_password": "a new secure password",
+    })
+    assert r.status_code == 200
+    assert r.json() == {"username": "new-admin"}
+    assert client.get("/api/auth/me").json()["username"] == "new-admin"
+    assert other.get("/api/auth/me").status_code == 401
+    assert other.post("/api/auth/login", json={"username": "admin", "password": "correct horse battery"}).status_code == 401
+    assert other.post("/api/auth/login", json={"username": "new-admin", "password": "correct horse battery"}).status_code == 401
+    assert other.post("/api/auth/login", json={"username": "new-admin", "password": "a new secure password"}).status_code == 200
+    db.expire_all()
+    assert verify_password(db.get(User, user.id).password_hash, "a new secure password")
+    entry = db.query(AuditLog).filter_by(action="auth.account_updated").one()
+    assert "password" not in str(entry.detail).replace("password_changed", "")
+
+
+def test_account_username_only_and_password_only(client):
+    assert client.put("/api/auth/account", json={
+        "username": "renamed", "current_password": "correct horse battery",
+    }).status_code == 200
+    assert client.put("/api/auth/account", json={
+        "username": "renamed", "current_password": "correct horse battery",
+        "new_password": "replacement password",
+    }).status_code == 200
+
+
+def test_account_protection_and_validation(client, anon, db):
+    from app.models import User
+    from app.security import hash_password
+    body = {"username": "changed", "current_password": "correct horse battery"}
+    assert anon.put("/api/auth/account", json=body).status_code == 401
+    token = client.headers.pop("X-CSRF-Token")
+    assert client.put("/api/auth/account", json=body).status_code == 403
+    client.headers["X-CSRF-Token"] = token
+    assert client.put("/api/auth/account", json={**body, "current_password": "wrong"}).status_code == 400
+    for invalid in ("", "   ", "with space", "a" * 65):
+        assert client.put("/api/auth/account", json={**body, "username": invalid}).status_code in (400, 422)
+    assert client.put("/api/auth/account", json={**body, "new_password": "short"}).status_code == 422
+    db.add(User(username="taken", password_hash=hash_password("another password")))
+    db.commit()
+    assert client.put("/api/auth/account", json={**body, "username": "taken"}).status_code == 409
+    assert client.get("/api/auth/me").json()["username"] == "admin"
+
+
+def test_account_password_attempts_rate_limited(client):
+    body = {"username": "admin", "current_password": "wrong"}
+    for _ in range(6):
+        assert client.put("/api/auth/account", json=body).status_code == 400
+    assert client.put("/api/auth/account", json=body).status_code == 429

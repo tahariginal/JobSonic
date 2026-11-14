@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Quer
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import ai, emailing, pipeline, preparation
@@ -43,7 +44,7 @@ from .models import (
     User,
 )
 from .schemas import ProfileData, profile_gaps
-from .security import SESSION_COOKIE, client_ip, create_session, limiter, lookup_session, require_session, verify_password
+from .security import SESSION_COOKIE, client_ip, create_session, hash_password, limiter, lookup_session, require_session, verify_password
 from .sources import ADAPTERS, PoliteClient, SourceError
 
 log = logging.getLogger("sonic.api")
@@ -114,6 +115,44 @@ def me(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(401, "Not authenticated")
     user = db.get(User, s.user_id)
     return {"username": user.username, "csrf_token": s.csrf_token}
+
+
+class AccountIn(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: Optional[str] = Field(default=None, min_length=12, max_length=256)
+
+
+@api.put("/auth/account")
+def update_account(body: AccountIn, request: Request, db: Session = Depends(get_db)):
+    sess = request.state.session
+    if not limiter.check(f"account:{sess.user_id}", 6, 300):
+        raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
+    user = db.get(User, sess.user_id)
+    if not verify_password(user.password_hash, body.current_password):
+        raise HTTPException(400, "Current password is incorrect.")
+    username = body.username.strip()
+    if not username or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in username):
+        raise HTTPException(400, "Username cannot be blank or contain whitespace or control characters.")
+    if db.scalar(select(User.id).where(User.username == username, User.id != user.id)):
+        raise HTTPException(409, "That username is already in use.")
+    changed_username = username != user.username
+    if not changed_username and body.new_password is None:
+        return {"username": user.username}
+    previous_username = user.username
+    user.username = username
+    if body.new_password is not None:
+        user.password_hash = hash_password(body.new_password)
+    try:
+        db.execute(delete(AuthSession).where(AuthSession.user_id == user.id, AuthSession.id != sess.id))
+        audit(db, previous_username, "auth.account_updated", detail={
+            "username_changed": changed_username, "password_changed": body.new_password is not None,
+        }, ip=client_ip(request))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "That username is already in use.")
+    return {"username": user.username}
 
 
 @api.post("/auth/logout")

@@ -9,8 +9,8 @@ import { JobDrawer } from "./JobDrawer";
 import { Logo } from "./Logo";
 import { Button, cx, Drawer, ToastProvider, useToast } from "./ui";
 
-type ShellCtx = { openJob: (id: number) => void; refreshKey: number; bump: () => void; searching: boolean; runSearch: () => void };
-const Ctx = createContext<ShellCtx>({ openJob: () => {}, refreshKey: 0, bump: () => {}, searching: false, runSearch: () => {} });
+type ShellCtx = { username: string; setUsername: (username: string) => void; openJob: (id: number) => void; refreshKey: number; bump: () => void; searching: boolean; runSearch: () => void };
+const Ctx = createContext<ShellCtx>({ username: "", setUsername: () => {}, openJob: () => {}, refreshKey: 0, bump: () => {}, searching: false, runSearch: () => {} });
 export const useShell = () => useContext(Ctx);
 
 const NAV = [
@@ -68,7 +68,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const current = tasks.find((t) => t.status === "running") ?? tasks[0];
 
   return (
-    <Ctx.Provider value={{ openJob: setJobId, refreshKey, bump, searching, runSearch }}>
+    <Ctx.Provider value={{ username: user, setUsername: setUser, openJob: setJobId, refreshKey, bump, searching, runSearch }}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[80] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-accent-ink">Skip to content</a>
       <div className="flex min-h-dvh">
         {/* desktop sidebar */}

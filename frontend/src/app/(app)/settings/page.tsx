@@ -6,7 +6,7 @@ import { Badge, Button, Callout, Card, cx, Empty, ErrorNote, Input, Label, PageH
 import { api, fmtDate, timeAgo, titleCase } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 
-const TABS = [{ id: "schedule", label: "Search & schedule" }, { id: "sources", label: "Job sources" }, { id: "ai", label: "AI" }, { id: "email", label: "Email" }, { id: "alerts", label: "Notifications" }, { id: "system", label: "System" }] as const;
+const TABS = [{ id: "account", label: "Account" }, { id: "schedule", label: "Search & schedule" }, { id: "sources", label: "Job sources" }, { id: "ai", label: "AI" }, { id: "email", label: "Email" }, { id: "alerts", label: "Notifications" }, { id: "system", label: "System" }] as const;
 
 export default function SettingsPage() {
   const { data: s, error, reload, setData } = useApi<any>("/settings");
@@ -29,6 +29,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" />
       <Tabs value={tab} onChange={setTab} items={TABS as any} />
       <div className="mt-5 space-y-4">
+        {tab === "account" && <Account />}
         {tab === "schedule" && <Schedule s={s} patch={patch} />}
         {tab === "sources" && <Sources />}
         {tab === "ai" && <AI s={s} patch={patch} />}
@@ -38,6 +39,42 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+function Account() {
+  const { username, setUsername } = useShell();
+  const toast = useToast();
+  const [name, setName] = useState(username);
+  const [current, setCurrent] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setError("");
+    if (password !== confirmation) { setError("New passwords do not match."); return; }
+    setBusy(true);
+    try {
+      const result = await api<{ username: string }>("/auth/account", { method: "PUT", body: {
+        username: name.trim(), current_password: current, ...(password ? { new_password: password } : {}),
+      } });
+      setUsername(result.username); setName(result.username);
+      setCurrent(""); setPassword(""); setConfirmation("");
+      toast("Account updated. Other sessions have been signed out.");
+    } catch (err: any) { setError(err.message); } finally { setBusy(false); }
+  }
+  return <Card className="p-5">
+    <h2 className="text-[13px] font-semibold">Sign-in details</h2>
+    <p className="mt-0.5 text-xs leading-relaxed text-ink-3">Change your username or password. Enter your current password to save. Other sessions will be signed out.</p>
+    <form onSubmit={save} className="mt-4 max-w-md space-y-4">
+      <div><Label htmlFor="account-username">Username</Label><Input id="account-username" required maxLength={64} autoComplete="username" value={name} onChange={(e) => setName(e.target.value)} /></div>
+      <div><Label htmlFor="account-current-password">Current password</Label><Input id="account-current-password" required type="password" maxLength={256} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></div>
+      <div><Label htmlFor="account-new-password">New password</Label><Input id="account-new-password" type="password" minLength={12} maxLength={256} autoComplete="new-password" aria-describedby="account-password-help" value={password} onChange={(e) => setPassword(e.target.value)} /><p id="account-password-help" className="mt-1 text-xs text-ink-3">At least 12 characters. Leave blank to keep your current password.</p></div>
+      <div><Label htmlFor="account-confirm-password">Confirm new password</Label><Input id="account-confirm-password" type="password" required={!!password} maxLength={256} autoComplete="new-password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} /></div>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      <Button type="submit" variant="primary" loading={busy} disabled={!name.trim() || (name.trim() === username && !password)}>Save account</Button>
+    </form>
+  </Card>;
 }
 
 function Row({ title, desc, children }: { title: string; desc?: React.ReactNode; children: React.ReactNode }) {
