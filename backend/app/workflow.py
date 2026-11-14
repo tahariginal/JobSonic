@@ -7,7 +7,7 @@ from . import automation, pipeline
 from .core import emit, get_setting, notify
 from .discovery import load_profile, verify_job
 from .models import Application, Document
-from .preparation import collect_issues, resolve_answer
+from .preparation import collect_issues, refresh_profile_answers, resolve_answer
 
 LOCKED = ("submitted", "submitting", "submit_uncertain", "approved")
 
@@ -31,6 +31,7 @@ def fill_application(db: Session, application_id: int, *, runner=None) -> dict:
         db.commit()
         return {"ok": False, "error": app.last_error}
     profile = load_profile(db)
+    refresh_profile_answers(db, app, profile)
     cv = db.get(Document, app.cv_document_id) if app.cv_document_id else None
     app.issues = collect_issues(app, profile, cv)
     if pipeline.blocking_issues(app):

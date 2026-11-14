@@ -44,6 +44,10 @@ Details and limits for each item: `docs/ROADMAP.md`.
 1. Open the dashboard and sign in (`docs/DEPLOYMENT.md` → Access).
 2. **Profile**: fill in name, email, phone, languages, start date, and upload a CV. Forms are only
    ever filled with what you enter here.
+   Under **Standard answers**, edit the reusable “Why this company?” answer used for motivation
+   questions, including when AI is off. Start-date questions use your saved earliest start date.
+   Saving your profile also resolves answerable gaps in pending applications; manual answers and
+   approved or submitted applications are preserved.
 3. **Jobs**: review matches. Open a job to see the quoted evidence for visa and eligibility.
 4. **Shortlist → Prepare application**. Answer anything marked "Needs your input".
 5. **Fill form for review**: the agent fills the employer's form and takes a screenshot.

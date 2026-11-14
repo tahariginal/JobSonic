@@ -98,6 +98,38 @@ def test_document_upload_validation(client):
     assert client.get(f"/api/documents/{doc_id}/download").status_code == 404
 
 
+def test_profile_defaults_resolve_pending_applications_and_preserve_manual_and_approved_answers(client, job_factory, cv, db):
+    from app.preparation import collect_issues, load_profile, prepare_application
+    from app.pipeline import touch_content
+
+    apps = [prepare_application(db, job_factory(external_id=f"defaults{i}"), use_ai=False) for i in range(3)]
+    for a in apps:
+        a.answers = list(a.answers) + [
+            {"key": "start", "label": "When would you like to start?", "type": "date", "required": True, "value": None, "source": ""},
+            {"key": "why", "label": "Why us?", "type": "textarea", "required": True, "value": None, "source": ""},
+        ]
+        a.issues = collect_issues(a, load_profile(db), cv)
+        touch_content(db, a, "fixture questions")
+    apps[1].answers = [{**a, "value": "My own answer", "source": "manual"} if a["key"] == "why" else a for a in apps[1].answers]
+    apps[2].status = "approved"
+    db.commit()
+    revision = apps[0].revision
+    profile = client.get("/api/profile").json()["data"]
+    profile["preferences"]["earliest_start_date"] = "2027-01-07"
+    profile["preferences"]["motivation_answer"] = "I want to contribute, learn, and grow with the team."
+    assert client.put("/api/profile", json=profile).status_code == 200
+    detail = client.get(f"/api/applications/{apps[0].id}").json()
+    answers = {a["key"]: a for a in detail["answers"]}
+    assert answers["start"]["value"] == "2027-01-07"
+    assert answers["why"]["value"] == profile["preferences"]["motivation_answer"]
+    assert detail["blocking_issues"] == 0 and detail["revision"] == revision + 1
+    assert client.post(f"/api/applications/{apps[0].id}/fill").status_code == 200
+    manual = client.get(f"/api/applications/{apps[1].id}").json()
+    assert next(a for a in manual["answers"] if a["key"] == "why")["value"] == "My own answer"
+    approved = client.get(f"/api/applications/{apps[2].id}").json()
+    assert approved["status"] == "approved" and next(a for a in approved["answers"] if a["key"] == "start")["value"] is None
+
+
 def test_job_listing_filters_and_detail(client, job_factory):
     a = job_factory(title="Junior Backend Engineer", external_id="a", description="0-2 years of experience. C++ APIs. Visa sponsorship is available.")
     job_factory(title="Senior Backend Engineer", external_id="b", country="France", location="Paris, France")

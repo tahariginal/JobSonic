@@ -71,6 +71,11 @@ class Preferences(BaseModel):
     salary_min: Optional[float] = None
     salary_currency: str = ""
     earliest_start_date: str = ""
+    motivation_answer: str = (
+        "I'm looking for a role where I can contribute to useful work, keep learning, and be part of a team I can learn from. "
+        "I enjoy solving problems, turning ideas into something practical, and improving things through feedback. "
+        "I'd like to bring that approach to this role, take responsibility for my work, and grow with the team over time."
+    )
     max_years_experience: float = 2
 
 

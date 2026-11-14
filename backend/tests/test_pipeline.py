@@ -247,3 +247,36 @@ def test_field_recognition_on_real_world_labels(db, profile, job_factory):
     assert ans("Are you legally authorized to work in the country in which you are applying?", options=["Yes", "No"])["value"] == "No"
     assert ans("Gender", options=["Male", "Female", "Decline To Self Identify"])["value"] == "Decline To Self Identify"
     assert ans("What is your favourite database and why?")["value"] is None
+
+
+@pytest.mark.parametrize("label", ["When would you like to start?", "When can you start?", "Earliest starting date",
+                                  "When will you be available to join?", "What date are you available from?",
+                                  "Preferred joining date", "Availability", "First available date"])
+def test_start_date_uses_saved_preference(label, profile, job_factory):
+    from app.preparation import resolve_answer
+    profile.preferences.earliest_start_date = "2027-01-07"
+    answer = resolve_answer({"key": "q", "label": label, "type": "date", "required": True}, job_factory(), profile, "", None)
+    assert answer["value"] == "2027-01-07" and answer["source"] == "profile"
+
+
+@pytest.mark.parametrize("label", ["Why us?", "Why do you want to work at Acme?", "Why would you like to join our team?",
+                                  "What interests you about this role?", "What motivates you to apply?"])
+def test_motivation_uses_editable_default_without_ai(label, profile, job_factory):
+    from app.preparation import resolve_answer
+    from app.schemas import StandardAnswer
+    job = job_factory()
+    field = {"key": "q", "label": label, "type": "textarea", "required": True}
+    assert resolve_answer(field, job, profile, "", None)["value"] == profile.preferences.motivation_answer
+    profile.standard_answers = [StandardAnswer(question=label, answer="My saved answer for this question.")]
+    assert resolve_answer(field, job, profile, "", None)["value"] == "My saved answer for this question."
+
+
+def test_defaults_do_not_guess_notice_period_or_override_choice_options(profile, job_factory):
+    from app.preparation import resolve_answer
+    job = job_factory()
+    answer = lambda label, **kw: resolve_answer({"key": "q", "label": label, "type": "text", **kw}, job, profile, "", None)
+    assert answer("What is your notice period?")["value"] is None
+    assert answer("How many weeks of notice do you need to give?")["value"] is None
+    assert answer("Why us?", type="select", options=["Our product", "Our culture"])["value"] is None
+    assert answer("Start date", type="select", options=["Immediately", "Next month"])["value"] is None
+    assert answer("What is your favourite database and why?")["value"] is None

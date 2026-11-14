@@ -192,6 +192,9 @@ def put_profile(body: ProfileData, request: Request, db: Session = Depends(get_d
         db.add(row)
     row.data = body.model_dump()
     row.updated_at = utcnow()
+    for application in db.scalars(select(Application).where(Application.status.in_(
+            ("draft", "prepared", "changes_requested", "failed", "needs_manual", "awaiting_approval")))):
+        preparation.refresh_profile_answers(db, application, body)
     audit(db, _actor(request), "profile.update", ip=client_ip(request))
     emit(db, "profile.updated", "Candidate profile updated; jobs will be re-scored.")
     enqueue(db, "reanalyze", {}, dedupe_key="reanalyze")
@@ -731,6 +734,8 @@ def fill(app_id: int, db: Session = Depends(get_db)):
     a = _get_app(db, app_id)
     if a.status in ("submitted", "submitting", "submit_uncertain", "approved"):
         raise HTTPException(409, {"message": f"Application is {a.status.replace('_', ' ')}.", "code": "state"})
+    if preparation.refresh_profile_answers(db, a, load_profile(db)):
+        db.commit()
     if pipeline.blocking_issues(a):
         raise HTTPException(409, {"message": "Resolve the open issues first.", "code": "issues"})
     t = enqueue(db, "fill_form", {"application_id": a.id}, dedupe_key=f"fill:{a.id}")

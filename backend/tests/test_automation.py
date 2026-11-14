@@ -159,15 +159,24 @@ def test_edit_after_approval_blocks_submit(db, job_factory, cv, server):
     assert Handler.posts == []
 
 
-def test_greenhouse_form_with_unanswerable_question_waits_for_user(db, job_factory, cv, server, monkeypatch):
+def test_greenhouse_fills_motivation_and_discovered_start_date_without_ai(db, job_factory, cv, server, monkeypatch):
+    from app.models import Profile
+    profile = preparation.load_profile(db)
+    profile.preferences.earliest_start_date = "2027-01-07"
+    db.get(Profile, 1).data = profile.model_dump()
+    db.commit()
     monkeypatch.setattr(preparation, "_greenhouse_schema", lambda job, client: [dict(f) for f in GH_SCHEMA])
     job, app = make_app(db, job_factory, server, "greenhouse", provider="greenhouse", company_name="Globex", token="globex", title="Graduate Software Engineer")
     by = {a["key"]: a for a in app.answers}
-    assert by["question_103"]["value"] is None  # "why us" is not invented when AI is off
+    assert by["question_103"]["value"] == profile.preferences.motivation_answer
     assert by["question_104"]["value"] == "Yes" and by["first_name"]["value"] == "Test"
-    assert any(i["code"] == "missing_answer" for i in pipeline.blocking_issues(app))
+    assert not pipeline.blocking_issues(app)
     out = workflow.fill_application(db, app.id)
-    assert out["ok"] is False and app.status == "prepared" and Handler.posts == []
+    assert out["ok"] and app.status == "awaiting_approval" and Handler.posts == []
+    by = {a["key"]: a for a in app.answers}
+    assert by["start_date"]["value"] == "2027-01-07"
+    assert {f["key"]: f["detail"] for f in app.fill_report["filled"]}["start_date"] == "ok"
+    assert {f["key"]: f["detail"] for f in app.fill_report["filled"]}["question_103"] == "ok"
 
     # the user writes the answer -> fill -> everything placed, including the hidden file input and the <select>
     answers = [dict(a) for a in app.answers]
@@ -191,6 +200,7 @@ def test_greenhouse_form_with_unanswerable_question_waits_for_user(db, job_facto
     assert workflow.submit_application(db, app.id, app.submit_key)["ok"] is True
     sent = body_text(Handler.posts[0])
     assert len(Handler.posts) == 1 and "I like the product" in sent and 'name="question_104"\r\n\r\n1' in sent
+    assert 'name="start_date"\r\n\r\n2027-01-07' in sent
 
 
 def test_ashby_spa_consent_must_be_given_by_user(db, job_factory, cv, server):

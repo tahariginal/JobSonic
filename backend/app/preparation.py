@@ -42,7 +42,10 @@ FIELD_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("work_auth", re.compile(r"(legally |currently )?(authori[sz]ed|eligible|entitled|permitted|right|permission) to work|work authori[sz]ation|right to work|legally work", re.I)),
     ("country", re.compile(r"^country\b|country of residence|current country|which country (do|are) you", re.I)),
     ("location", re.compile(r"\b(current )?(location|city)\b|where (are you|do you) (currently )?(based|located|live)|where.*reside", re.I)),
-    ("start_date", re.compile(r"start date|when (can|could|would) you (start|join|begin)|availab(le|ility) to start|notice period|earliest.*(start|join)", re.I)),
+    ("notice_period", re.compile(r"notice period|how (much|long).*notice", re.I)),
+    ("start_date", re.compile(r"(start(ing)?|join(ing)?) date|when (can|could|would|will) you (like to |be (available|able) to )?(start|join|begin)|"
+                              r"availab(le|ility) (to |for (a )?)(start|join)|earliest.*(start|join)|date.*(start|join|availab)|"
+                              r"available (from|date)|availability date|^availability\s*[?*:]*$", re.I)),
     ("salary", re.compile(r"salary|compensation expectation|expected (pay|compensation)|pay expectation", re.I)),
     ("current_company", re.compile(r"current (company|employer)|most recent (company|employer)|^(org|organization|company)\b", re.I)),
     ("current_title", re.compile(r"current (title|role|position)|job title", re.I)),
@@ -258,7 +261,13 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
     if kind == "start_date":
         d = profile.preferences.earliest_start_date
         note = "Earliest desired start date from your profile. Actual start depends on work-authorization processing." if not authorized_here else ""
-        return setv(d or std or None, "profile" if d else ("standard" if std else ""), note)
+        value = d or std or None
+        if options:
+            value = _pick_option(options, value) if value else None
+        return setv(value, "profile" if d else ("standard" if std else ""), note)
+    if kind == "notice_period":
+        return setv((_pick_option(options, std) if options else std) if std else None,
+                    "standard" if std else "", "" if std else "Save your notice period in Standard application answers; a start date is not a notice period.")
     if kind == "salary":
         if std:
             return setv(std, "standard")
@@ -287,7 +296,35 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
         return setv(None, "", "Consent / acknowledgement: you must tick this yourself during review.")
     if std:
         return setv(std if not options else (_pick_option(options, std) or None), "standard")
+    if kind == "why" and ftype in ("text", "textarea") and not options:
+        return setv(profile.preferences.motivation_answer.strip() or None, "profile",
+                    "Reusable motivation answer from Profile → Standard answers. Review it before approving.")
     return setv(None, "")  # custom question: needs the generated-materials step or the user
+
+
+def refresh_profile_answers(db: Session, app: Application, profile: ProfileData) -> bool:
+    """Resolve newly answerable questions without replacing manual edits or approved content."""
+    if app.status in ("approved", "submitted", "submitting", "submit_uncertain", "declined"):
+        return False
+    cv = db.get(Document, app.cv_document_id) if app.cv_document_id else None
+    answers, resolved = [], set()
+    for old in app.answers or []:
+        answer = old
+        kind = classify_field(old.get("label", ""), old.get("key", ""))
+        if old.get("source") != "manual" and (old.get("value") in (None, "", []) or
+                                                (kind in ("start_date", "why") and old.get("source") == "profile")):
+            fresh = resolve_answer(old, app.job, profile, app.cover_letter, cv)
+            if fresh["value"] not in (None, "", []) and fresh["value"] != old.get("value"):
+                answer = {**old, **fresh}
+                resolved.add(old.get("label", ""))
+        answers.append(answer)
+    if not resolved:
+        return False
+    app.answers = answers
+    app.issues = collect_issues(app, profile, cv) + [i for i in (app.issues or [])
+                  if i.get("code") == "form_field" and i.get("field_label") not in resolved]
+    touch_content(db, app, "answers refreshed from profile")
+    return True
 
 
 def collect_issues(app: Application, profile: ProfileData, cv: Optional[Document]) -> list[dict]:

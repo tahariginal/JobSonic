@@ -40,7 +40,7 @@ export default function ProfilePage() {
 
   return (
     <div className="animate-in mx-auto max-w-4xl">
-      <PageHeader title="Candidate profile" subtitle="This is the only source of facts used in applications. Nothing is inferred or invented: empty fields stay empty in forms." />
+      <PageHeader title="Candidate profile" subtitle="Your profile and saved answers are used to fill applications. Keep your details, preferred start date, and reusable answers up to date here." />
       {data?.gaps?.length > 0 && <div className="mb-5"><Callout tone="warn" title="Still missing">{data.gaps.join(" · ")}</Callout></div>}
       <Tabs value={tab} onChange={setTab} items={TABS as any} />
 
@@ -97,8 +97,16 @@ export default function ProfilePage() {
           </Card>
         </>)}
 
-        {tab === "answers" && <Rows title="Standard application answers" hint="When a form asks a similar question, your saved answer is used word for word." items={p.standard_answers} onChange={(v) => up("standard_answers", v)} blank={{ question: "", answer: "" }}
-          fields={[["question", "Question (e.g. How did you hear about us?)"], ["answer", "Your answer", "area"]]} wide />}
+        {tab === "answers" && <>
+          <Card className="space-y-3 p-5">
+            <h2 className="text-[13px] font-semibold">Automatic motivation answer</h2>
+            <p className="text-xs text-ink-3">Used for questions such as “Why us?” or “Why do you want to join?” even when AI is off. A matching standard answer below takes priority.</p>
+            <div><Label htmlFor="motivation">Why this company?</Label><Textarea id="motivation" rows={5} value={p.preferences.motivation_answer ?? ""} onChange={(e) => up("preferences.motivation_answer", e.target.value)} /></div>
+            <p className="text-xs text-ink-3">Start-date questions use your earliest start date in Work authorization & preferences. Saving your profile also fills answerable gaps in applications awaiting your input.</p>
+          </Card>
+          <Rows title="Standard application answers" hint="When a form asks a similar question, your saved answer is used word for word." items={p.standard_answers} onChange={(v) => up("standard_answers", v)} blank={{ question: "", answer: "" }}
+            fields={[["question", "Question (e.g. How did you hear about us?)"], ["answer", "Your answer", "area"]]} wide />
+        </>}
 
         {tab === "documents" && <Documents docs={docs.data} reload={docs.reload} />}
       </div>
