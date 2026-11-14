@@ -1,7 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { login } from "./helpers";
 
-const PAGES = ["/", "/jobs/", "/pipeline/", "/approvals/", "/activity/", "/analytics/", "/profile/", "/settings/"];
+const PAGES = ["/", "/jobs/", "/pipeline/", "/approvals/", "/application-tracker/", "/activity/", "/analytics/", "/profile/", "/settings/"];
+
+test("application tracker is reachable from navigation", async ({ page }) => {
+  await login(page);
+  const more = page.getByRole("button", { name: "More", exact: true });
+  if (await more.isVisible()) await more.click();
+  await page.getByRole("link", { name: "Application tracker", exact: true }).filter({ visible: true }).click();
+  await expect(page.getByRole("heading", { name: "Application tracker", exact: true })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Tracked applications" })).toBeVisible();
+});
 
 test("no page scrolls sideways and navigation is reachable", async ({ page }) => {
   await login(page);

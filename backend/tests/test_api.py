@@ -23,7 +23,7 @@ def client(user):
 
 PROTECTED = ["/api/profile", "/api/jobs", "/api/pipeline", "/api/overview", "/api/analytics", "/api/events", "/api/approvals",
              "/api/documents", "/api/settings", "/api/companies", "/api/notifications", "/api/emails", "/api/audit", "/api/tasks",
-             "/api/applications", "/api/documents/1/download", "/api/screenshots/1", "/api/email/status"]
+             "/api/applications", "/api/application-tracker", "/api/documents/1/download", "/api/screenshots/1", "/api/email/status"]
 
 
 @pytest.mark.parametrize("path", PROTECTED)
@@ -159,6 +159,62 @@ def test_ineligible_job_cannot_be_prepared_without_override(client, job_factory)
     assert client.post(f"/api/jobs/{j.id}/prepare").json()["detail"]["code"] == "ineligible"
     client.patch(f"/api/jobs/{j.id}", json={"eligibility": "needs_review"})
     assert client.post(f"/api/jobs/{j.id}/prepare").status_code == 200
+
+
+def test_application_tracker_tracks_forms_without_confusing_them_with_submissions(client, job_factory, db):
+    from app.models import Application
+    from app.db import utcnow
+
+    empty = client.get("/api/application-tracker").json()
+    assert empty["items"] == [] and empty["total"] == 0 and empty["summary"]["companies"] == 0
+    jobs = [job_factory(external_id=f"track{i}") for i in range(3)]
+    job_factory(external_id="unprepared", token="other", company_name="Not applied")
+    apps = [Application(job=jobs[0], status="prepared"),
+            Application(job=jobs[1], status="awaiting_approval", revision=2, content_hash="current",
+                        fill_report={"outcome": "filled", "finished_at": "2026-11-14T10:00:00Z", "revision": 2,
+                                     "content_hash": "current", "filled": [{"key": "email", "value": "private@example.com"}]}),
+            Application(job=jobs[2], status="submitted", submitted_via="manual", submitted_at=utcnow())]
+    db.add_all(apps)
+    db.commit()
+    result = client.get("/api/application-tracker").json()
+    assert result["summary"] == {"companies": 1, "applications": 3, "awaiting_approval": 1, "submitted": 1}
+    rows = {a["id"]: a for a in result["items"]}
+    assert rows[apps[0].id]["form_attempted_at"] is None
+    filled = rows[apps[1].id]
+    assert filled["fields_filled"] == 1 and filled["fill_is_current"] is True and filled["submitted_at"] is None
+    assert "private@example.com" not in str(result)
+    assert rows[apps[2].id]["submitted_via"] == "manual"
+    apps[1].revision = 3
+    db.commit()
+    filtered = client.get("/api/application-tracker", params={"q": "  acME  ", "status": "awaiting_approval"}).json()
+    assert filtered["total"] == 1 and filtered["items"][0]["fill_is_current"] is False
+    assert filtered["summary"] == result["summary"]
+    assert client.get("/api/application-tracker", params={"q": "BACKEND"}).json()["total"] == 3
+    assert client.get("/api/application-tracker", params={"q": "%"}).json()["total"] == 0
+    assert client.get("/api/application-tracker", params={"q": "Not applied"}).json()["items"] == []
+    assert client.get("/api/application-tracker?limit=101").status_code == 422
+    assert client.get("/api/application-tracker?offset=-1").status_code == 422
+
+
+def test_application_tracker_paginates_past_300_with_stable_order(client, job_factory, db):
+    from app.db import utcnow
+    from app.models import Application, Job
+
+    first = job_factory()
+    now = utcnow()
+    for i in range(305):
+        job = Job(company_id=first.company_id, provider="lever", external_id=f"page{i}", title=f"Role {i}",
+                  canonical_url=f"https://jobs.example/page{i}", apply_url=f"https://jobs.example/page{i}/apply",
+                  source_url=f"https://jobs.example/page{i}", fingerprint=f"page{i}")
+        db.add(Application(job=job, status="prepared", updated_at=now))
+    db.commit()
+    ids = []
+    for offset in range(0, 305, 100):
+        result = client.get("/api/application-tracker", params={"offset": offset, "limit": 100}).json()
+        assert result["total"] == 305
+        ids.extend(a["id"] for a in result["items"])
+    assert len(ids) == len(set(ids)) == 305
+    assert ids == sorted(ids, reverse=True)
 
 
 def test_settings_validation_and_secrets_never_returned(client):

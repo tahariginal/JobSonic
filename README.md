@@ -48,7 +48,10 @@ Details and limits for each item: `docs/ROADMAP.md`.
 4. **Shortlist → Prepare application**. Answer anything marked "Needs your input".
 5. **Fill form for review**: the agent fills the employer's form and takes a screenshot.
 6. **Approvals**: check exactly what will be sent, then approve, request changes or reject.
-7. Track results in **Pipeline**, **Activity** and **Analytics**.
+7. Open **Application tracker** in the sidebar to see every company and role with an application,
+   form progress, approval/submission status, and dates. Search by company or role, filter by status,
+   and open the saved application to review its answers, screenshots, and history. **Pipeline**,
+   **Activity** and **Analytics** provide the wider view.
 
 ## Service control
 

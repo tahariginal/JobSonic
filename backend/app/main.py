@@ -626,6 +626,33 @@ def list_applications(status: str = "", db: Session = Depends(get_db)):
     return [_app_json(db, a, full=False) for a in db.scalars(stmt.limit(300))]
 
 
+@api.get("/application-tracker")
+def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge=0),
+                        limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)):
+    counts = dict(db.execute(select(Application.status, func.count(Application.id)).group_by(Application.status)).all())
+    companies = db.scalar(select(func.count(func.distinct(Job.company_id))).join(Application, Application.job_id == Job.id)) or 0
+    stmt = select(Application).join(Job, Application.job_id == Job.id).join(Company, Job.company_id == Company.id)
+    if q.strip():
+        stmt = stmt.where(or_(Company.name.icontains(q.strip(), autoescape=True), Job.title.icontains(q.strip(), autoescape=True)))
+    if status:
+        stmt = stmt.where(Application.status == status)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    items = []
+    for a in db.scalars(stmt.order_by(Application.updated_at.desc(), Application.id.desc()).offset(offset).limit(limit)):
+        j, report = a.job, a.fill_report or {}
+        items.append({
+            "id": a.id, "company": j.company.name, "title": j.title, "location": j.location_raw,
+            "status": a.status, "stage": j.stage, "created_at": iso(a.created_at), "updated_at": iso(a.updated_at),
+            "submitted_at": iso(a.submitted_at), "submitted_via": a.submitted_via,
+            "last_error": a.last_error, "blocking_issues": len(pipeline.blocking_issues(a)),
+            "form_attempted_at": report.get("finished_at"), "form_outcome": report.get("outcome"),
+            "fields_filled": len(report.get("filled") or []),
+            "fill_is_current": bool(report) and report.get("revision") == a.revision and report.get("content_hash") == a.content_hash,
+        })
+    return {"items": items, "total": total, "summary": {"companies": companies, "applications": sum(counts.values()),
+            "awaiting_approval": counts.get("awaiting_approval", 0), "submitted": counts.get("submitted", 0)}, "statuses": counts}
+
+
 @api.get("/approvals")
 def approvals(db: Session = Depends(get_db)):
     waiting = db.scalars(select(Application).where(Application.status == "awaiting_approval").order_by(Application.updated_at.desc())).all()

@@ -1,5 +1,5 @@
 "use client";
-import { Activity, BarChart3, Bell, Briefcase, CheckCheck, ClipboardCheck, KanbanSquare, LayoutDashboard, LogOut, Menu, Radar, Settings, UserRound } from "lucide-react";
+import { Activity, BarChart3, Bell, Briefcase, CheckCheck, ClipboardCheck, ListChecks, KanbanSquare, LayoutDashboard, LogOut, Menu, Radar, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -18,6 +18,7 @@ const NAV = [
   { href: "/jobs/", label: "Jobs", icon: Briefcase },
   { href: "/pipeline/", label: "Pipeline", icon: KanbanSquare },
   { href: "/approvals/", label: "Approvals", icon: ClipboardCheck, badge: true },
+  { href: "/application-tracker/", label: "Application tracker", icon: ListChecks },
   { href: "/activity/", label: "Activity", icon: Activity },
   { href: "/analytics/", label: "Analytics", icon: BarChart3 },
   { href: "/profile/", label: "Profile", icon: UserRound },
