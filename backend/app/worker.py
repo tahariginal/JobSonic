@@ -34,9 +34,39 @@ def t_discovery(db: Session, p: dict) -> dict:
                 enqueue(db, "ai_evaluate", {"job_id": jid}, dedupe_key=f"ai:{jid}")
         db.commit()
     if not p.get("company_ids"):
+        out["automatic_submissions"] = queue_ready_submissions(db, verified_since=started)
         out["auto_applications"] = queue_auto_applications(db, verified_since=started)
     out.pop("new_ids", None)
     return out
+
+
+def queue_ready_submissions(db: Session, *, verified_since: datetime) -> int:
+    """Resume filled automatic applications under the current policy after a full refresh."""
+    cfg = get_setting(db, "automation")
+    if not cfg.get("auto_fill_enabled") or not cfg.get("auto_submit_enabled"):
+        return 0
+    applications = db.scalars(select(Application).join(Job, Application.job_id == Job.id)
+                             .where(Application.status == "awaiting_approval", Application.automation_mode == "automatic",
+                                    Job.last_verified_at >= verified_since)
+                             .order_by(Job.fit_score.desc(), Job.id))
+    queued = 0
+    limit = max(1, min(100, int(cfg["max_applications_per_cycle"])))
+    for application in applications:
+        if pipeline.automatic_submission_reason(db, application):
+            continue
+        try:
+            pipeline.approve(db, application, application.revision, application.content_hash, automatic=True)
+        except pipeline.PipelineError:
+            # Stale content returns to preparation without stopping independent applications.
+            continue
+        queued += 1
+        if queued >= limit:
+            break
+    if queued:
+        emit(db, "autosubmit.queued", f"Queued {queued} completed automatic applications to submit, highest fit first.",
+             data={"queued": queued})
+    db.commit()
+    return queued
 
 
 def queue_auto_applications(db: Session, *, verified_since: datetime) -> int:
@@ -53,10 +83,10 @@ def queue_auto_applications(db: Session, *, verified_since: datetime) -> int:
     if not cfg.get("include_other_matches"):
         stmt = stmt.where(or_(Job.visa_status == "confirmed", Job.remote_mode == "remote"))
     priority = case((Job.visa_status == "confirmed", 0), (Job.remote_mode == "remote", 1), else_=2)
-    jobs = list(db.scalars(stmt.order_by(priority, Job.fit_score.desc(), Job.discovered_at.desc(), Job.id).limit(limit)))
+    jobs = list(db.scalars(stmt.order_by(Job.fit_score.desc(), priority, Job.discovered_at.desc(), Job.id).limit(limit)))
     counts = {"visa_confirmed": 0, "remote": 0, "other": 0}
     for job in jobs:
-        application = Application(job=job, status="draft", revision=0)
+        application = Application(job=job, status="draft", revision=0, automation_mode="automatic")
         db.add(application)
         job.stage = "preparing"
         db.flush()
@@ -70,7 +100,9 @@ def queue_auto_applications(db: Session, *, verified_since: datetime) -> int:
     runs["autofill"] = {"at": utcnow().isoformat() + "Z", "queued": len(jobs), **counts}
     set_setting(db, "last_runs", runs)
     emit(db, "autofill.cycle", f"Search-to-fill cycle queued {len(jobs)} applications: {counts['visa_confirmed']} visa-confirmed, "
-         f"{counts['remote']} remote, {counts['other']} other eligible matches. Submission waits for approval.", data=runs["autofill"])
+         f"{counts['remote']} remote, {counts['other']} other eligible matches. "
+         + ("Completed forms submit automatically." if cfg.get("auto_submit_enabled") else "Submission waits for approval."),
+         data=runs["autofill"])
     db.commit()
     return len(jobs)
 
@@ -103,6 +135,8 @@ def t_prepare(db: Session, p: dict) -> dict:
         return {"error": "job not found"}
     if p.get("automatic"):
         existing = db.scalar(select(Application).where(Application.job_id == job.id))
+        if existing is not None and existing.automation_mode != "automatic":
+            return {"skipped": "Application switched to manual mode."}
         if existing is not None and existing.status != "draft":
             return {"skipped": "Application already prepared or reviewed."}
         reason = automatic_skip_reason(db, job)
@@ -110,7 +144,7 @@ def t_prepare(db: Session, p: dict) -> dict:
             if existing is not None:
                 existing.last_error = reason
             return {"skipped": reason}
-    app = preparation.prepare_application(db, job, use_ai=p.get("use_ai", True))
+    app = preparation.prepare_application(db, job, use_ai=False if p.get("automatic") else p.get("use_ai", True))
     db.commit()
     if p.get("then_fill") and not pipeline.blocking_issues(app):
         enqueue(db, "fill_form", {"application_id": app.id, "automatic": bool(p.get("automatic"))}, dedupe_key=f"fill:{app.id}")
@@ -122,6 +156,8 @@ def t_fill(db: Session, p: dict) -> dict:
         application = db.get(Application, p["application_id"])
         if application is None:
             return {"error": "application not found"}
+        if application.automation_mode != "automatic":
+            return {"skipped": "Application switched to manual mode."}
         if application.status != "prepared":
             return {"skipped": "Application already filled or reviewed."}
         reason = automatic_skip_reason(db, application.job)
@@ -134,7 +170,7 @@ def t_fill(db: Session, p: dict) -> dict:
 
 
 def t_submit(db: Session, p: dict) -> dict:
-    return workflow.submit_application(db, p["application_id"], p["submit_key"])
+    return workflow.submit_application(db, p["application_id"], p["submit_key"], automatic=bool(p.get("automatic")))
 
 
 def t_ai_evaluate(db: Session, p: dict) -> dict:

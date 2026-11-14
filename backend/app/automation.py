@@ -256,7 +256,7 @@ def _save_shot(db: Session, app: Application, page, kind: str) -> Optional[str]:
 
 
 def run_form(db: Session, app: Application, mode: str = "fill", *, headless: bool = True, timeout_s: int = 120,
-             expect_filled: Optional[set] = None) -> FormRunResult:
+             expect_filled: Optional[set] = None, automatic: bool = False) -> FormRunResult:
     """Open the official form, fill it, screenshot it; in submit mode press the final button once."""
     from playwright.sync_api import TimeoutError as PWTimeout
     from playwright.sync_api import sync_playwright
@@ -383,6 +383,14 @@ def run_form(db: Session, app: Application, mode: str = "fill", *, headless: boo
                 res["error"] = "Could not find the submit button; nothing was sent."
                 res["outcome"] = "failed_before_send"
                 return res
+            if automatic:
+                from .pipeline import automatic_submission_reason, compute_content_hash
+                db.expire_all()
+                reason = automatic_submission_reason(db, app)
+                if reason or app.status != "submitting" or compute_content_hash(db, app) != app.approved_hash:
+                    res["error"] = reason or "Submission authorization changed; nothing was sent."
+                    res["outcome"] = "failed_before_send"
+                    return res
             url_before = page.url
             res["clicked_at"] = utcnow().isoformat() + "Z"
             btn.click()

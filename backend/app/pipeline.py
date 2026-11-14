@@ -2,7 +2,8 @@
 
 The single most important invariant in the system lives here:
 an application is only ever submitted when the *exact* content hash of the current
-revision was explicitly approved, and each approval can drive at most one submission.
+revision was authorized by individual approval or the saved automatic policy,
+and each authorization can drive at most one submission.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .core import audit, emit, enqueue, notify
+from .core import audit, emit, enqueue, get_setting, notify
 from .db import utcnow
 from .models import Application, ApprovalEvent, Document, Job, MaterialVersion
 
@@ -142,9 +143,36 @@ def blocking_issues(app: Application) -> list[dict]:
     return [i for i in (app.issues or []) if i.get("blocking")]
 
 
-def approve(db: Session, app: Application, revision: int, content_hash: str, comment: str = "", actor: str = "user") -> Application:
+def automatic_submission_reason(db: Session, app: Application) -> str:
+    from .discovery import load_profile
+    if load_profile(db).application_policy.require_final_approval:
+        return "Your candidate profile requires individual approval before final submission."
+    cfg = get_setting(db, "automation")
+    if not cfg.get("auto_fill_enabled") or not cfg.get("auto_submit_enabled"):
+        return "Automatic submission is paused in Settings."
+    if app.automation_mode != "automatic":
+        return "This application is in manual mode."
+    if (not app.job.company.enabled or not app.job.is_active or app.job.eligibility != "eligible"
+            or app.job.stage in ("archived", "rejected")):
+        return "This job no longer meets the automatic application criteria."
+    if blocking_issues(app):
+        return "Required answers are still missing."
+    report = app.fill_report or {}
+    if not report.get("ok") or report.get("revision") != app.revision or report.get("content_hash") != app.content_hash:
+        return "The current application must be filled successfully before automatic submission."
+    return ""
+
+
+def approve(db: Session, app: Application, revision: int, content_hash: str, comment: str = "", actor: str = "user",
+            *, automatic: bool = False) -> Application:
     if app.status != "awaiting_approval":
         raise PipelineError(f"Application is “{app.status.replace('_', ' ')}”, not awaiting approval.", "state")
+    if automatic:
+        reason = automatic_submission_reason(db, app)
+        if reason:
+            raise PipelineError(reason, "automatic_blocked")
+        actor = "automatic_policy"
+        comment = "Authorized by the saved automatic-submission setting."
     current = compute_content_hash(db, app)
     if current != app.content_hash:
         touch_content(db, app, "drift detected at approval")
@@ -165,7 +193,7 @@ def approve(db: Session, app: Application, revision: int, content_hash: str, com
     emit(db, "approval.approved", f"Approved revision {app.revision}: {app.job.company.name} — {app.job.title}.",
          job_id=app.job_id, application_id=app.id)
     audit(db, actor, "application.approve", f"application:{app.id}", {"revision": app.revision, "hash": app.content_hash})
-    enqueue(db, "submit_application", {"application_id": app.id, "submit_key": app.submit_key},
+    enqueue(db, "submit_application", {"application_id": app.id, "submit_key": app.submit_key, "automatic": automatic},
             dedupe_key=f"submit:{app.submit_key}")
     return app
 

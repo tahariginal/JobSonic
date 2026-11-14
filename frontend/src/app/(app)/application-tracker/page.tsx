@@ -17,7 +17,7 @@ const STATUS: Record<string, [string, string]> = {
   declined: ["neutral", "Declined by you"],
 };
 type Application = {
-  id: number; company: string; title: string; location: string; status: string; stage: string;
+  id: number; company: string; title: string; location: string; status: string; stage: string; automation_mode: string;
   created_at: string; updated_at: string; submitted_at: string | null; submitted_via: string;
   last_error: string; blocking_issues: number; form_attempted_at: string | null;
   form_outcome: string | null; fields_filled: number; fill_is_current: boolean;
@@ -26,7 +26,7 @@ type Application = {
 type Tracker = {
   items: Application[]; total: number; statuses: Record<string, number>;
   summary: { companies: number; applications: number; awaiting_approval: number; submitted: number };
-  automation?: { enabled: boolean; interval_hours: number; max_applications: number; include_other_matches: boolean;
+  automation?: { enabled: boolean; auto_submit_enabled: boolean; interval_hours: number; max_applications: number; include_other_matches: boolean;
     next_search_at: string | null; search_active: boolean; applications_active: number;
     last_cycle: { at: string; queued: number; visa_confirmed: number; remote: number; other: number } | null };
 };
@@ -34,7 +34,7 @@ const PAGE_SIZE = 50;
 const date = (value: string) => new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
 function formProgress(a: Application) {
-  if (a.active_task) return `${a.active_task.type === "fill_form" ? "Filling form" : "Preparing application"}${a.active_task.status === "queued" ? " · queued" : " · in progress"}`;
+  if (a.active_task) return `${a.active_task.type === "submit_application" ? "Submitting application" : a.active_task.type === "fill_form" ? "Filling form" : "Preparing application"}${a.active_task.status === "queued" ? " · queued" : " · in progress"}`;
   if (!a.form_attempted_at) return a.submitted_via === "manual" ? "Completed manually" : "No current form review";
   if (!a.fill_is_current) return "Form changed · refill needed";
   if (a.form_outcome === "filled") return `${a.fields_filled} fields filled`;
@@ -61,7 +61,8 @@ export default function ApplicationTrackerPage() {
       {automation && <Card className="mb-6 flex flex-wrap items-start justify-between gap-3 p-4">
         <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">Automatic application cycle</h2><Badge tone={automation.enabled ? "good" : "neutral"}>{automation.enabled ? `Every ${automation.interval_hours} hours` : "Schedule paused"}</Badge></div>
-          <p className="text-xs text-ink-2">Full search → confirmed visa sponsorship → remote roles{automation.include_other_matches ? " → other eligible matches" : ""} → fill for review. Up to {automation.max_applications} new applications per cycle.</p>
+          <p className="text-xs text-ink-2">Full search → highest fit scores first → {automation.auto_submit_enabled ? "fill and submit automatically" : "fill for review"}. Up to {automation.max_applications} new applications per cycle. Visa sponsorship and remote roles break ties{automation.include_other_matches ? "; other eligible matches are included" : "; only visa-sponsored or remote matches are included"}.</p>
+          <p className="text-xs text-ink-3">{automation.auto_submit_enabled ? "Completed automatic applications submit without individual approval. " : ""}Manual applications remain available. Missing answers and manual steps stay here while other jobs continue.</p>
           <p className="text-xs text-ink-3">{automation.search_active ? "Search queued or running." : automation.enabled ? (automation.next_search_at && new Date(automation.next_search_at).getTime() > Date.now() ? `Next search ${fmtDate(automation.next_search_at)}.` : "Next search is due; it will start when the worker is available.") : "Enable the schedule and automatic filling in Settings to run without opening the app."}{automation.applications_active > 0 ? ` ${automation.applications_active} applications queued or in progress.` : ""}</p>
           {automation.last_cycle && <p className="text-xs text-ink-3">Last cycle {fmtDate(automation.last_cycle.at)}: {automation.last_cycle.queued} queued ({automation.last_cycle.visa_confirmed} visa-confirmed, {automation.last_cycle.remote} remote, {automation.last_cycle.other} other).</p>}
         </div>
@@ -102,7 +103,7 @@ export default function ApplicationTrackerPage() {
             </div>
             <ul aria-label="Tracked applications" aria-busy={loading} className="divide-y divide-line">
               {data.items.map((a) => {
-                const [tone, label] = a.active_task ? ["info", a.active_task.status === "queued" ? "Queued" : a.active_task.type === "fill_form" ? "Filling form" : "Preparing"] : STATUS[a.status] ?? ["neutral", titleCase(a.status)];
+                const [tone, label] = a.active_task ? ["info", a.active_task.status === "queued" ? "Queued" : a.active_task.type === "submit_application" ? "Submitting" : a.active_task.type === "fill_form" ? "Filling form" : "Preparing"] : a.status === "prepared" && a.blocking_issues > 0 ? ["warn", "Needs answers"] : STATUS[a.status] ?? ["neutral", titleCase(a.status)];
                 return (
                   <li key={a.id} className="grid min-w-0 gap-4 px-5 py-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:gap-5">
                     <div className="min-w-0">
@@ -113,6 +114,7 @@ export default function ApplicationTrackerPage() {
                     </div>
                     <div className="min-w-0 space-y-2">
                       <Badge tone={tone}>{label}</Badge>
+                      <p className="text-xs text-ink-3">{a.automation_mode === "automatic" ? "Automatic application" : "Manual application"}</p>
                       {["interview", "offer", "rejected"].includes(a.stage) && <p className="text-xs text-ink-2">Latest outcome: {titleCase(a.stage)}</p>}
                       {a.last_error ? <p className="break-words text-xs text-warn">{a.last_error}</p> : a.blocking_issues > 0 ? <p className="text-xs text-warn">{a.blocking_issues} item{a.blocking_issues === 1 ? " needs" : "s need"} your input</p> : null}
                       {a.status === "submit_uncertain" && <p className="text-xs text-ink-3">Check the employer site before trying again.</p>}

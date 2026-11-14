@@ -26,6 +26,10 @@ from .sources import ADAPTERS, PoliteClient
 # ---------------------------------------------------------------- field recognition
 
 FIELD_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("consent", re.compile(r"privacy (policy|notice|statement)|\bconsent\b|\bi agree\b|\bi acknowledge\b|data (protection|processing)|"
+                           r"\bterms\b|\bopt.in\b|share.*(resume|contact information)|record.*interview|interview.*record|AI notetaker", re.I)),
+    ("declaration", re.compile(r"government official|government employ|relative.*government|conflict of interest|financial interest|"
+                               r"(previously|ever|formerly).*(employed|employment|worked)|offer deadline|background check", re.I)),
     ("first_name", re.compile(r"^(legal )?(first|given) name|^prénom", re.I)),
     ("last_name", re.compile(r"^(legal )?(last|family) name|surname|^nom de famille", re.I)),
     ("preferred_name", re.compile(r"preferred (first )?name|what should we call you", re.I)),
@@ -36,6 +40,7 @@ FIELD_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("cover_letter", re.compile(r"cover letter|motivation letter|lettre de motivation", re.I)),
     ("linkedin", re.compile(r"linkedin", re.I)),
     ("github", re.compile(r"github|gitlab|code repository", re.I)),
+    ("x_account", re.compile(r"\btwitter\b|\bX (account|profile|handle|URL|link)\b|^X\s*[/(:]", re.I)),
     ("portfolio", re.compile(r"portfolio|personal (web)?site|website|personal url|other (website|link)s?", re.I)),
     ("relocation", re.compile(r"\breloca", re.I)),
     ("sponsorship", re.compile(r"sponsor|visa (support|status|requirement)|work permit|require.*(visa|immigration)|immigration (support|status)", re.I)),
@@ -47,7 +52,11 @@ FIELD_PATTERNS: list[tuple[str, re.Pattern]] = [
                               r"availab(le|ility) (to |for (a )?)(start|join)|earliest.*(start|join)|date.*(start|join|availab)|"
                               r"available (from|date)|availability date|^availability\s*[?*:]*$", re.I)),
     ("salary", re.compile(r"salary|compensation expectation|expected (pay|compensation)|pay expectation", re.I)),
-    ("current_company", re.compile(r"current (company|employer)|most recent (company|employer)|^(org|organization|company)\b", re.I)),
+    ("adult", re.compile(r"at least 18|18 (years (of age|old) )?(or older|and over)", re.I)),
+    ("high_school_graduation", re.compile(r"(high.school|baccalaur).*graduat|graduat.*(high.school|baccalaur)", re.I)),
+    ("graduation", re.compile(r"graduat.*(year|date|month)|(?:year|date|month).*graduat", re.I)),
+    ("gpa", re.compile(r"\bgpa\b|grade point average", re.I)),
+    ("current_company", re.compile(r"current (company|employer)|most recent (company|employer)|current/last company|current or previous employer|where have you most recently worked|^(org|organization|company)\b", re.I)),
     ("current_title", re.compile(r"current (title|role|position)|job title", re.I)),
     ("school", re.compile(r"\b(school|university|college|institution)\b", re.I)),
     ("degree", re.compile(r"\bdegree\b|level of education|highest education", re.I)),
@@ -208,6 +217,11 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
     std = match_standard_answer(label, profile)
     authorized_here = bool(job.country) and job.country.lower() in {c.lower() for c in profile.work_authorization.authorized_countries}
 
+    if kind == "declaration":
+        exact = next((sa.answer.strip() for sa in profile.standard_answers
+                      if sa.question.strip().casefold() == label.strip().casefold() and sa.answer.strip()), None)
+        return setv(_pick_option(options, exact) if options and exact else exact, "standard" if exact else "",
+                    "" if exact else "This declaration needs a confirmed answer to this exact question.")
     if kind == "resume":
         return setv({"document_id": cv.id, "filename": cv.filename} if cv else None, "profile" if cv else "",
                     "" if cv else "No CV uploaded yet.")
@@ -233,6 +247,9 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
         return setv(profile.links.linkedin or None, "profile")
     if kind == "github":
         return setv(profile.links.github or None, "profile")
+    if kind == "x_account":
+        account = next((url for url in profile.links.other if re.match(r"https://(?:www\.)?(?:x\.com|twitter\.com)/[^/?#]+/?$", url, re.I)), None)
+        return setv(account, "profile" if account else "")
     if kind == "portfolio":
         return setv(profile.links.portfolio or None, "profile")
     if kind == "country":
@@ -252,7 +269,7 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
         return setv(std or ("Yes, I would need employer-supported work authorization." if needs else "No."),
                     "standard" if std else "profile")
     if kind == "work_auth":
-        if not job.country and not options:
+        if not job.country:
             return setv(std, "standard" if std else "", "" if std else "Job country unknown; cannot answer truthfully.")
         if options:
             return setv(_pick_option(options, "yes" if authorized_here else "no"), "profile",
@@ -266,18 +283,38 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
             value = _pick_option(options, value) if value else None
         return setv(value, "profile" if d else ("standard" if std else ""), note)
     if kind == "notice_period":
-        return setv((_pick_option(options, std) if options else std) if std else None,
-                    "standard" if std else "", "" if std else "Save your notice period in Standard application answers; a start date is not a notice period.")
+        value = profile.candidate_facts.notice_period or std
+        return setv((_pick_option(options, value) if options else value) if value else None,
+                    "standard" if std else "profile" if value else "", "" if value else "Notice period is unconfirmed; a start date is not a notice period.")
     if kind == "salary":
+        if not profile.preferences.salary_period or not profile.preferences.salary_context_verified:
+            return setv(None, "", "Salary period and the relevant currency/country context must be confirmed before a numerical expectation is used.")
         if std:
             return setv(std, "standard")
-        pm = profile.preferences.salary_min
-        return setv(f"{pm:g} {profile.preferences.salary_currency}".strip() if pm else None, "profile" if pm else "")
+        return setv(None, "", "Save a verified salary answer for this question, including its currency and payment period.")
+    if kind == "adult":
+        confirmed = profile.candidate_facts.age_18_or_older
+        value = None if confirmed is None else "Yes" if confirmed else "No"
+        return setv(_pick_option(options, value) if options and value else value, "profile" if value else "")
+    if kind in ("high_school_graduation", "graduation"):
+        education = profile.education[0] if profile.education else None
+        year = (profile.candidate_facts.high_school_graduation_year if kind == "high_school_graduation"
+                else education.expected_graduation_year if education else None)
+        if "year" not in label.lower() or ftype in ("date", "month"):
+            return setv(std, "standard" if std else "", "Exact graduation month/date is unconfirmed." if not std else "")
+        value = str(year) if year else std
+        return setv(_pick_option(options, value) if options and value else value, "profile" if year else "standard" if std else "")
+    if kind == "gpa":
+        return setv(std if ftype != "number" else None, "standard" if std and ftype != "number" else "",
+                    "Do not convert project-based evaluation into a numerical GPA.")
     if kind == "current_company":
-        return setv(std or (profile.experience[0].company if profile.experience else None), "standard" if std else "profile",
-                    "" if std else "Most recent experience listed in your profile.")
+        latest = bool(re.search(r"last|previous|recent", label, re.I))
+        value = (profile.candidate_facts.latest_confirmed_employer if latest else profile.candidate_facts.current_employer) or std
+        return setv(value or None, "standard" if std else "profile" if value else "",
+                    "" if value else "Current employment is not confirmed; previous internships do not establish a current employer.")
     if kind == "current_title":
-        return setv(std or (profile.experience[0].title if profile.experience else None), "standard" if std else "profile")
+        value = profile.candidate_facts.current_title or std
+        return setv(value or None, "standard" if std else "profile" if value else "")
     if kind == "school":
         return setv(profile.education[0].school if profile.education else None, "profile")
     if kind == "degree":
@@ -293,7 +330,12 @@ def resolve_answer(field: dict, job: Job, profile: ProfileData, cover_letter: st
             return setv(decline, "skipped" if not decline else "profile", "Voluntary question: answered with the decline option." if decline else "Voluntary question left unanswered.")
         return setv(None, "skipped", "Voluntary question left unanswered.")
     if kind == "consent":
-        return setv(None, "", "Consent / acknowledgement: you must tick this yourself during review.")
+        exact = next((sa.answer.strip() for sa in profile.standard_answers
+                      if sa.question.strip().casefold() == label.strip().casefold() and sa.answer.strip()), None)
+        if exact:
+            return setv(_pick_option(options, exact) if options else exact, "standard",
+                        "Your saved choice for this exact consent question.")
+        return setv(None, "", "Consent / acknowledgement: you must tick this yourself during review, or save your choice for this exact question in Standard answers.")
     if std:
         return setv(std if not options else (_pick_option(options, std) or None), "standard")
     if kind == "why" and ftype in ("text", "textarea") and not options:
@@ -310,11 +352,9 @@ def refresh_profile_answers(db: Session, app: Application, profile: ProfileData)
     answers, resolved = [], set()
     for old in app.answers or []:
         answer = old
-        kind = classify_field(old.get("label", ""), old.get("key", ""))
-        if old.get("source") != "manual" and (old.get("value") in (None, "", []) or
-                                                (kind in ("start_date", "why") and old.get("source") == "profile")):
+        if old.get("source") != "manual" and (old.get("value") in (None, "", []) or old.get("source") in ("profile", "standard")):
             fresh = resolve_answer(old, app.job, profile, app.cover_letter, cv)
-            if fresh["value"] not in (None, "", []) and fresh["value"] != old.get("value"):
+            if fresh["value"] != old.get("value"):
                 answer = {**old, **fresh}
                 resolved.add(old.get("label", ""))
         answers.append(answer)
@@ -361,7 +401,7 @@ def _facts(profile: ProfileData) -> dict:
     return {
         "education": [e.model_dump() for e in profile.education],
         "experience": [e.model_dump() for e in profile.experience],
-        "projects": [e.model_dump() for e in profile.projects],
+        "projects": [e.model_dump() for e in profile.projects if e.verified],
         "skills": profile.skills,
         "interests": profile.interests,
         "languages": [l.model_dump() for l in profile.languages],
@@ -369,6 +409,8 @@ def _facts(profile: ProfileData) -> dict:
         "summary": profile.personal.summary,
         "work_authorization": profile.work_authorization.model_dump(),
         "location": profile.personal.country,
+        "candidate_facts": profile.candidate_facts.model_dump(),
+        "application_policy": profile.application_policy.model_dump(),
     }
 
 
@@ -393,7 +435,7 @@ def template_cover_letter(job: Job, profile: ProfileData) -> str:
             s += " " + desc.strip().rstrip(".") + "."
         paras.append(s)
     matched = (job.fit_breakdown or {}).get("matched_skills") or []
-    proj = next((x for x in p.projects if x.name), None)
+    proj = next((x for x in p.projects if x.name and x.verified), None)
     s = ""
     if matched:
         s = f"The role's focus on {', '.join(matched[:3])} lines up with what I have been working on and want to keep building."
@@ -421,7 +463,7 @@ def template_fit_pitch(job: Job, profile: ProfileData) -> str:
     if profile.experience:
         parts.append("Experience: " + "; ".join(f"{e.title} at {e.company}" for e in profile.experience[:3] if e.company) + ".")
     if profile.projects:
-        parts.append("Projects: " + "; ".join(x.name for x in profile.projects[:3] if x.name) + ".")
+        parts.append("Projects: " + "; ".join(x.name for x in profile.projects[:3] if x.name and x.verified) + ".")
     return " ".join(parts)
 
 

@@ -411,7 +411,9 @@ def score_fit(*, title: str, description: str, role_family: str, level: str, min
 
     sal = 0.5
     sal_known = salary_min is not None
-    if sal_known and profile.preferences.salary_min and (not profile.preferences.salary_currency or profile.preferences.salary_currency.upper() == (salary_currency or "").upper()):
+    if (sal_known and profile.preferences.salary_min and profile.preferences.salary_period == "year"
+            and profile.preferences.salary_context_verified
+            and profile.preferences.salary_currency.upper() == (salary_currency or "").upper()):
         sal = 1.0 if salary_min >= profile.preferences.salary_min else 0.2
     elif sal_known:
         sal = 0.7

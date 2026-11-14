@@ -156,6 +156,7 @@ class Application(Base):
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), unique=True)
     job: Mapped[Job] = relationship(lazy="joined")
     status: Mapped[str] = mapped_column(String(24), default="draft")
+    automation_mode: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual")
     revision: Mapped[int] = mapped_column(Integer, default=1)
     cv_document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("documents.id"), nullable=True)
     cover_letter: Mapped[str] = mapped_column(Text, default="")

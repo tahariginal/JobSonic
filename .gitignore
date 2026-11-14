@@ -12,4 +12,5 @@ frontend/test-results/
 frontend/playwright-report/
 *.log
 e2e/.auth.json
+frontend/e2e/.auth.json
 *.tsbuildinfo

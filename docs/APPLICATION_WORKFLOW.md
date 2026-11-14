@@ -2,7 +2,7 @@
 
 ## 1. Discovery (automatic, no AI)
 
-Every 12 hours (Settings → Search & schedule) the worker reads each enabled employer board, keeps
+Every 3 hours by default (Settings → Search & schedule) the worker reads each enabled employer board, keeps
 engineering titles, and for each posting stores the official URL, job ID, timestamps and a content
 fingerprint. Known jobs are updated only when their content changes; jobs that disappear from the
 board are marked closed. A job you are working on is re-verified daily and before every form run.
@@ -58,7 +58,11 @@ uploads the CV, takes a full-page screenshot and stops. It never presses submit.
 - Questions that only exist on the live page are added to the answer list and resolved the same way.
 - A required field that cannot be completed, a CAPTCHA, a login wall or a closed posting stops the
   run and creates a notification.
-- When everything required is in place the job moves to **Awaiting approval**.
+- When everything required is in place, a manual application moves to **Awaiting approval**.
+- With automatic filling and submission enabled, scheduled applications authorize the completed
+  version under your saved policy and queue submission directly. Manual applications remain available.
+- Required unknown answers or human checks stop only that application. Saving missing profile answers
+  resumes automatic applications that are ready. The tracker shows progress and confirmed submissions.
 
 ## 5. Approve
 
@@ -70,11 +74,15 @@ whether each was actually entered in the form, and the screenshot. Then:
 - **Reject**: nothing is sent; the job leaves your pipeline.
 - **Edit** anything: saves a new version, cancels any approval, and the form must be filled again.
 
-## 6. Submit (only after approval)
+## 6. Submit (individual approval or saved automatic policy)
 
 The worker re-checks that the vacancy is open and that the approved hash still matches, claims the
 submission once, refills the form, confirms the same fields were placed, presses submit **once**
 and looks for a confirmation page.
+Automatic submissions additionally re-check the enabled setting, application mode and eligibility,
+including a final policy check immediately before clicking. Turning off automatic submission stops
+queued automatic sends; a submission already sent cannot be recalled. Each application has a mode
+control to switch to manual before submission starts.
 
 | Outcome | What happens |
 |---|---|

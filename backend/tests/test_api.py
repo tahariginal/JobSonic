@@ -376,3 +376,61 @@ def test_account_password_attempts_rate_limited(client):
     for _ in range(6):
         assert client.put("/api/auth/account", json=body).status_code == 400
     assert client.put("/api/auth/account", json=body).status_code == 429
+
+
+def test_automatic_submission_toggle_and_manual_takeover(client, job_factory, cv, db, monkeypatch):
+    from app import pipeline, workflow
+    from app.preparation import prepare_application
+    from app.models import Application
+    r = client.put('/api/settings', json={'automation': {'auto_fill_enabled': True, 'auto_submit_enabled': True},
+                                          'schedule': {'discovery_interval_hours': 3}})
+    assert r.status_code == 200 and r.json()['automation']['auto_submit_enabled'] is True
+    assert client.put('/api/settings', json={'automation': {'auto_submit_enabled': 'true'}}).status_code == 400
+    a = prepare_application(db, job_factory(), use_ai=False)
+    db.commit()
+    r = client.put(f'/api/applications/{a.id}/mode', json={'mode': 'automatic'})
+    assert r.status_code == 200 and r.json()['automation_mode'] == 'automatic'
+    db.expire_all()
+    a = db.get(Application, a.id)
+    monkeypatch.setattr(workflow, 'verify_job', lambda *a: True)
+    def filled(db, app, mode, **kw):
+        return {'ok': True, 'outcome': 'filled', 'revision': app.revision, 'content_hash': app.content_hash,
+                'filled': [{'key': 'name'}], 'unmapped_required': [], 'discovered': []}
+    assert workflow.fill_application(db, a.id, automatic=True, runner=filled)['ok']
+    assert a.status == 'approved'
+    submit_key = a.submit_key
+    tracker = client.get('/api/application-tracker').json()
+    assert tracker['automation']['auto_submit_enabled'] is True
+    assert tracker['items'][0]['automation_mode'] == 'automatic'
+    assert tracker['items'][0]['active_task']['type'] == 'submit_application'
+    r = client.put(f'/api/applications/{a.id}/mode', json={'mode': 'manual'})
+    assert r.status_code == 200 and r.json()['status'] == 'awaiting_approval'
+    assert r.json()['automation_mode'] == 'manual' and r.json()['approved_at'] is None
+    db.expire_all()
+    assert pipeline.begin_submit(db, a.id, submit_key) is None
+    assert db.query(Task).filter_by(status='queued').count() == 0
+
+
+def test_saved_answers_resume_only_automatic_applications(client, job_factory, cv, db):
+    from app.preparation import prepare_application, collect_issues
+    from app.discovery import load_profile
+    from app.pipeline import touch_content
+    from app.models import Application
+    client.put('/api/settings', json={'automation': {'auto_fill_enabled': True, 'auto_submit_enabled': True}})
+    apps = []
+    for mode in ('automatic', 'manual'):
+        a = prepare_application(db, job_factory(external_id=mode), use_ai=False)
+        a.automation_mode = mode
+        a.answers = list(a.answers) + [{'key': 'custom', 'label': 'What is your favorite algorithm?',
+                    'type': 'text', 'required': True, 'value': None, 'source': '', 'options': []}]
+        a.issues = collect_issues(a, load_profile(db), cv)
+        touch_content(db, a, 'new question')
+        apps.append(a.id)
+    db.commit()
+    p = client.get('/api/profile').json()['data']
+    p['standard_answers'] = [{'question': 'What is your favorite algorithm?', 'answer': 'Binary search.'}]
+    assert client.put('/api/profile', json=p).status_code == 200
+    db.expire_all()
+    fill_tasks = db.query(Task).filter_by(type='fill_form').all()
+    assert len(fill_tasks) == 1 and fill_tasks[0].payload == {'application_id': apps[0], 'automatic': True}
+    assert not db.get(Application, apps[0]).issues

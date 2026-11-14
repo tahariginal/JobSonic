@@ -16,7 +16,7 @@ log = logging.getLogger("sonic")
 DEFAULT_SETTINGS: dict[str, Any] = {
     "schedule": {
         "discovery_enabled": True,
-        "discovery_interval_hours": 12,
+        "discovery_interval_hours": 3,
         "verify_enabled": True,
         "verify_interval_hours": 24,
         "email_sync_enabled": True,
@@ -43,6 +43,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "automation": {
         "max_form_seconds": 120,
         "auto_fill_enabled": False,
+        "auto_submit_enabled": False,
         "max_applications_per_cycle": 20,
         "include_other_matches": True,
     },

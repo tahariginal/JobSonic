@@ -192,9 +192,16 @@ def put_profile(body: ProfileData, request: Request, db: Session = Depends(get_d
         db.add(row)
     row.data = body.model_dump()
     row.updated_at = utcnow()
+    if body.application_policy.require_final_approval:
+        cfg = get_setting(db, "automation")
+        cfg["auto_submit_enabled"] = False
+        set_setting(db, "automation", cfg)
     for application in db.scalars(select(Application).where(Application.status.in_(
             ("draft", "prepared", "changes_requested", "failed", "needs_manual", "awaiting_approval")))):
-        preparation.refresh_profile_answers(db, application, body)
+        changed = preparation.refresh_profile_answers(db, application, body)
+        if (changed and application.automation_mode == "automatic" and application.status == "prepared"
+                and get_setting(db, "automation")["auto_fill_enabled"] and not pipeline.blocking_issues(application)):
+            enqueue(db, "fill_form", {"application_id": application.id, "automatic": True}, dedupe_key=f"fill:{application.id}")
     audit(db, _actor(request), "profile.update", ip=client_ip(request))
     emit(db, "profile.updated", "Candidate profile updated; jobs will be re-scored.")
     enqueue(db, "reanalyze", {}, dedupe_key="reanalyze")
@@ -535,6 +542,11 @@ def prepare(job_id: int, db: Session = Depends(get_db)):
         raise HTTPException(409, {"message": "This vacancy is closed.", "code": "closed"})
     if j.eligibility == "rejected" and not j.manual_override:
         raise HTTPException(409, {"message": "This job failed a hard eligibility rule. Override its eligibility first if you still want to apply.", "code": "ineligible"})
+    existing = db.scalar(select(Application).where(Application.job_id == j.id))
+    if existing is not None:
+        if existing.status in ("approved", "submitting", "submitted", "submit_uncertain"):
+            raise HTTPException(409, "This application is queued to send or has already been sent.")
+        existing.automation_mode = "manual"
     if j.stage in ("discovered", "verified"):
         j.stage = "shortlisted"
     t = enqueue(db, "prepare_application", {"job_id": j.id}, dedupe_key=f"prepare:{j.id}")
@@ -580,7 +592,7 @@ def _app_json(db: Session, a: Application, full: bool = True) -> dict:
     out = {
         "id": a.id, "job_id": j.id, "company": j.company.name, "title": j.title, "location": j.location_raw, "country": j.country,
         "apply_url": j.apply_url, "form_url": (a.form_schema or {}).get("form_url") or j.apply_url, "provider": j.provider,
-        "status": a.status, "stage": j.stage, "revision": a.revision, "content_hash": a.content_hash,
+        "status": a.status, "automation_mode": a.automation_mode, "stage": j.stage, "revision": a.revision, "content_hash": a.content_hash,
         "fit_stars": j.fit_stars, "fit_reason": j.fit_reason, "visa_status": j.visa_status, "is_active": j.is_active,
         "cv": _doc_json(cv) if cv else None, "issues": a.issues or [], "blocking_issues": len(pipeline.blocking_issues(a)),
         "approved_revision": a.approved_revision, "approved_at": iso(a.approved_at), "submitted_at": iso(a.submitted_at),
@@ -632,7 +644,7 @@ def list_applications(status: str = "", db: Session = Depends(get_db)):
 @api.get("/application-tracker")
 def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge=0),
                         limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)):
-    active_tasks = list(db.scalars(select(Task).where(Task.type.in_(("discovery", "prepare_application", "fill_form")),
+    active_tasks = list(db.scalars(select(Task).where(Task.type.in_(("discovery", "prepare_application", "fill_form", "submit_application")),
                                                      Task.status.in_(("queued", "running"))).order_by(Task.id)))
     work = {(t.payload or {}).get("application_id"): {"type": t.type, "status": t.status} for t in active_tasks
             if (t.payload or {}).get("application_id")}
@@ -659,7 +671,7 @@ def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge
         j, report = a.job, a.fill_report or {}
         items.append({
             "id": a.id, "company": j.company.name, "title": j.title, "location": j.location_raw,
-            "status": a.status, "stage": j.stage, "created_at": iso(a.created_at), "updated_at": iso(a.updated_at),
+            "status": a.status, "automation_mode": a.automation_mode, "stage": j.stage, "created_at": iso(a.created_at), "updated_at": iso(a.updated_at),
             "active_task": work.get(a.id), "visa_status": j.visa_status, "remote_mode": j.remote_mode,
             "submitted_at": iso(a.submitted_at), "submitted_via": a.submitted_via,
             "last_error": a.last_error, "blocking_issues": len(pipeline.blocking_issues(a)),
@@ -670,6 +682,7 @@ def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge
     return {"items": items, "total": total, "summary": {"companies": companies, "applications": sum(counts.values()),
             "awaiting_approval": counts.get("awaiting_approval", 0), "submitted": counts.get("submitted", 0)}, "statuses": counts,
             "automation": {"enabled": bool(cfg["auto_fill_enabled"] and schedule["discovery_enabled"]),
+                           "auto_submit_enabled": cfg["auto_submit_enabled"],
                            "interval_hours": schedule["discovery_interval_hours"], "max_applications": cfg["max_applications_per_cycle"],
                            "include_other_matches": cfg["include_other_matches"], "next_search_at": next_search_at,
                            "search_active": any(t.type == "discovery" for t in active_tasks),
@@ -687,6 +700,46 @@ def approvals(db: Session = Depends(get_db)):
 @api.get("/applications/{app_id}")
 def application_detail(app_id: int, db: Session = Depends(get_db)):
     return _app_json(db, _get_app(db, app_id))
+
+
+class ApplicationModeIn(BaseModel):
+    mode: str = Field(pattern="^(manual|automatic)$")
+
+
+@api.put("/applications/{app_id}/mode")
+def application_mode(app_id: int, body: ApplicationModeIn, request: Request, db: Session = Depends(get_db)):
+    a = _get_app(db, app_id)
+    if a.status in ("submitting", "submitted", "submit_uncertain", "declined"):
+        raise HTTPException(409, "This application cannot change mode in its current state.")
+    if body.mode == a.automation_mode:
+        return _app_json(db, a)
+    if body.mode == "automatic" and (a.job.eligibility != "eligible" or not a.job.is_active or not a.job.company.enabled):
+        raise HTTPException(409, "Automatic applications must be active and eligible on an enabled job source.")
+    pipeline.invalidate_approval(db, a, "application mode changed")
+    a.automation_mode = body.mode
+    if a.status == "approved":
+        a.status = "awaiting_approval"
+    # Supersede pending work, including an automatic submission already queued.
+    for task in db.scalars(select(Task).where(Task.status == "queued", Task.type.in_(
+            ("prepare_application", "fill_form", "submit_application")))):
+        if (task.payload or {}).get("application_id") == a.id or (task.payload or {}).get("job_id") == a.job_id:
+            task.status, task.finished_at = "done", utcnow()
+            task.result = {"skipped": "Application mode changed."}
+    db.flush()
+    if body.mode == "automatic" and get_setting(db, "automation")["auto_fill_enabled"]:
+        if a.status == "draft":
+            enqueue(db, "prepare_application", {"job_id": a.job_id, "application_id": a.id,
+                    "automatic": True, "then_fill": True}, dedupe_key=f"prepare:{a.job_id}")
+        else:
+            a.status = "prepared"
+            a.job.stage = "preparing"
+            if not pipeline.blocking_issues(a):
+                enqueue(db, "fill_form", {"application_id": a.id, "automatic": True}, dedupe_key=f"fill:{a.id}")
+    audit(db, _actor(request), "application.mode", f"application:{a.id}", {"mode": body.mode}, ip=client_ip(request))
+    emit(db, "application.mode", f"Application switched to {body.mode}: {a.job.company.name} — {a.job.title}.",
+         application_id=a.id, job_id=a.job_id)
+    db.commit()
+    return _app_json(db, a)
 
 
 class AnswerEdit(BaseModel):
@@ -745,6 +798,9 @@ def edit_application(app_id: int, body: AppEdit, request: Request, db: Session =
         db.rollback()
         raise HTTPException(409, {"message": str(e), "code": e.code})
     audit(db, _actor(request), "application.edit", f"application:{a.id}", {"revision": a.revision, "changed": changed}, ip=client_ip(request))
+    if (changed and a.automation_mode == "automatic" and a.status == "prepared"
+            and get_setting(db, "automation")["auto_fill_enabled"] and not pipeline.blocking_issues(a)):
+        enqueue(db, "fill_form", {"application_id": a.id, "automatic": True}, dedupe_key=f"fill:{a.id}")
     db.commit()
     return _app_json(db, a)
 
@@ -758,7 +814,7 @@ def fill(app_id: int, db: Session = Depends(get_db)):
         db.commit()
     if pipeline.blocking_issues(a):
         raise HTTPException(409, {"message": "Resolve the open issues first.", "code": "issues"})
-    t = enqueue(db, "fill_form", {"application_id": a.id}, dedupe_key=f"fill:{a.id}")
+    t = enqueue(db, "fill_form", {"application_id": a.id, "automatic": a.automation_mode == "automatic"}, dedupe_key=f"fill:{a.id}")
     db.commit()
     return {"task_id": t.id}
 
@@ -1100,7 +1156,7 @@ def _clean(key: str, incoming: dict) -> dict:
             continue
         v = incoming[k]
         if isinstance(default, bool):
-            if key == "automation" and k in ("auto_fill_enabled", "include_other_matches") and not isinstance(v, bool):
+            if key == "automation" and not isinstance(v, bool):
                 raise HTTPException(400, f"{key}.{k} must be true or false")
             out[k] = bool(v)
         elif isinstance(default, (int, float)):
@@ -1130,6 +1186,10 @@ def put_settings(body: SettingsIn, request: Request, db: Session = Depends(get_d
             continue
         merged = get_setting(db, key)
         merged.update(_clean(key, incoming))
+        if key == "automation" and "auto_submit_enabled" in incoming:
+            profile = load_profile(db)
+            profile.application_policy.require_final_approval = not merged["auto_submit_enabled"]
+            db.get(Profile, 1).data = profile.model_dump()
         set_setting(db, key, merged)
         audit(db, _actor(request), "settings.update", key, detail=_clean(key, incoming), ip=client_ip(request))
     db.commit()

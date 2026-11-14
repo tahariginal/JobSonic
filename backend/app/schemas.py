@@ -1,7 +1,7 @@
 """Pydantic schemas. The profile is user-verified data: nothing here is ever inferred."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,9 @@ class Education(BaseModel):
     start: str = ""
     end: str = ""
     notes: str = ""
+    expected_graduation_year: Optional[int] = None
+    expected_graduation_month: Optional[int] = Field(None, ge=1, le=12)
+    gpa_status: str = ""
 
 
 class Experience(BaseModel):
@@ -42,6 +45,8 @@ class Experience(BaseModel):
     end: str = ""
     location: str = ""
     description: str = ""
+    status: str = ""
+    notes: str = ""
 
 
 class Project(BaseModel):
@@ -50,6 +55,7 @@ class Project(BaseModel):
     url: str = ""
     tech: list[str] = Field(default_factory=list)
     status: str = ""  # e.g. "in progress", "shipped" - as stated by the candidate
+    verified: bool = True
 
 
 class Language(BaseModel):
@@ -70,6 +76,10 @@ class Preferences(BaseModel):
     open_to_remote: bool = True
     salary_min: Optional[float] = None
     salary_currency: str = ""
+    salary_period: Literal["", "month", "year"] = ""
+    salary_context_verified: bool = False
+    salary_currencies_by_region: dict[str, str] = Field(default_factory=dict)
+    arrangement_preferences: dict[str, str] = Field(default_factory=dict)
     earliest_start_date: str = ""
     motivation_answer: str = (
         "I'm looking for a role where I can contribute to useful work, keep learning, and be part of a team I can learn from. "
@@ -82,6 +92,27 @@ class Preferences(BaseModel):
 class StandardAnswer(BaseModel):
     question: str = ""
     answer: str = ""
+
+
+class CandidateFacts(BaseModel):
+    age_18_or_older: Optional[bool] = None
+    high_school_graduation_year: Optional[int] = None
+    latest_confirmed_employer: str = ""
+    current_employer: str = ""
+    current_title: str = ""
+    current_employment_status: str = ""
+    notice_period: str = ""
+    government_employment: Optional[bool] = None
+    close_relatives_in_government: Optional[bool] = None
+    conflicts_of_interest: Optional[bool] = None
+    active_offer_deadlines: Optional[str] = None
+
+
+class ApplicationPolicy(BaseModel):
+    require_final_approval: bool = True
+    consent_preferences: dict[str, str] = Field(default_factory=dict)
+    verification_notes: list[str] = Field(default_factory=list)
+    needs_attention: list[str] = Field(default_factory=list)
 
 
 class ProfileData(BaseModel):
@@ -97,6 +128,8 @@ class ProfileData(BaseModel):
     work_authorization: WorkAuthorization = Field(default_factory=WorkAuthorization)
     preferences: Preferences = Field(default_factory=Preferences)
     standard_answers: list[StandardAnswer] = Field(default_factory=list)
+    candidate_facts: CandidateFacts = Field(default_factory=CandidateFacts)
+    application_policy: ApplicationPolicy = Field(default_factory=ApplicationPolicy)
 
 
 def seed_profile() -> ProfileData:

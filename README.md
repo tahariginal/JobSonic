@@ -3,7 +3,8 @@
 Personal job discovery and application control center. It runs on one small server, finds junior
 engineering jobs on employers' official job boards, checks eligibility and visa evidence with
 deterministic rules, prepares applications, fills the real application form in a headless browser,
-and **stops for your approval before anything is sent**.
+and supports both **automatic submission using saved answers** and **manual review before sending**.
+Automatic submission is enabled explicitly in Settings and can be paused at any time.
 
 Principle: scripts do the repetitive work. AI is optional, off by default, and only used when
 reasoning is needed.
@@ -58,14 +59,33 @@ Details and limits for each item: `docs/ROADMAP.md`.
    **Activity** and **Analytics** provide the wider view.
 
 For a recurring search-to-fill cycle, use **Settings → Search & schedule**: enable automatic job
-search, choose the interval (for example, **4 hours**), and enable **Automatically fill applications**.
+search, choose the interval (default **3 hours**), and enable **Automatically fill applications**.
+Enable **Automatically submit applications** to authorize completed scheduled applications to be
+sent using your saved answers and CV, without individual approval.
 Each full search queues up to the configured number of new eligible applications (default 20),
-prioritizing confirmed visa sponsorship, then remote roles, then other eligible matches if enabled.
+starting with the highest fit scores. Confirmed visa sponsorship and remote roles break ties;
+other eligible matches are included when enabled.
 Only jobs freshly verified on enabled official boards are selected. Existing applications and
 archived jobs are skipped; unresolved questions and failed attempts remain in the tracker for review.
-Forms are re-verified before filling and always stop for approval before submission. The worker
-runs this cycle even when the dashboard is closed. Pause automatic filling in Settings to stop
-queued automatic preparation/filling tasks from proceeding.
+Forms are re-verified before filling and submission. Missing answers, human checks and uncertain
+outcomes stay in the tracker while other applications continue; facts and consents are never guessed.
+Saving missing profile answers resumes eligible automatic forms when all required answers are available.
+The worker runs this cycle even when the dashboard is closed. Pause automatic filling or submission
+in Settings to stop pending automatic sends. Applications you prepare from Jobs use manual review;
+each application also has an **Application mode** control for switching between automatic and manual.
+The tracker refreshes automatically and records confirmed submissions, dates, screenshots and errors.
+Each full search also picks up completed automatic applications waiting under an earlier review-only
+setting, rechecks their eligibility and saved authorization, and queues them by fit score. Manual
+applications and unknown submission outcomes are excluded from this recovery.
+
+The persistent profile also records confirmed education years, adult eligibility, current versus
+previous employment, consent preferences and unresolved facts. An unconfirmed salary period is
+never treated as a yearly amount, used as a salary floor, or submitted as a numerical expectation.
+Your profile's final-approval requirement takes precedence over automatic submission; saving that
+requirement turns automatic submission off. Consent choices require an answer to the exact question.
+
+After updating an existing installation, run `backend/.venv/bin/alembic -c backend/alembic.ini upgrade head`
+from the project root (or `.venv/bin/alembic upgrade head` from `backend/`) before restarting the services.
 
 ## Service control
 

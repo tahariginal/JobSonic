@@ -37,10 +37,13 @@
 | Telegram alerts | Bot token and chat ID |
 | AI | Your go-ahead to run the Claude CLI unattended on your subscription (`AI_COSTS.md`) |
 
-## Always needs your approval
+## Authorization and manual exceptions
 
-Every submission; ticking consent boxes; anything the profile cannot answer; continuing past a
-CAPTCHA or login; public exposure; enabling AI; any email reply (the system cannot send email).
+Scheduled applications can submit under your saved automatic-submission setting, without individual
+approval. Manually prepared applications retain individual approval. Required unknown answers and
+consent choices, CAPTCHA or login challenges, and unconfirmed submission outcomes remain for your
+attention while other applications continue. Public exposure and enabling AI require your direction;
+the system cannot send email replies.
 
 ## Not supported
 

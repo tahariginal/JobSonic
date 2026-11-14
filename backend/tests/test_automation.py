@@ -275,3 +275,46 @@ def test_field_matching_prefers_key_then_label_then_kind():
            {"sid": "d", "name": "q4", "id": "", "label": "Favourite colour", "type": "text"}]
     m = match_fields(answers, dom)
     assert m["email"]["sid"] == "a" and m["x"]["sid"] == "b" and m["y"]["sid"] == "c" and len(m) == 3
+
+
+def test_automatic_submission_uses_saved_answers_and_sends_once(db, job_factory, cv, server):
+    from app.core import set_setting
+    from app.models import Profile
+    job, app = make_app(db, job_factory, server, 'lever')
+    app.automation_mode = 'automatic'
+    profile = preparation.load_profile(db)
+    profile.application_policy.require_final_approval = False
+    db.get(Profile, 1).data = profile.model_dump()
+    set_setting(db, 'automation', {'auto_fill_enabled': True, 'auto_submit_enabled': True})
+    db.commit()
+    assert workflow.fill_application(db, app.id, automatic=True)['ok']
+    assert app.status == 'approved' and Handler.posts == []
+    key = app.submit_key
+    assert workflow.submit_application(db, app.id, key, automatic=True)['ok']
+    assert not workflow.submit_application(db, app.id, key, automatic=True)['ok']
+    assert len(Handler.posts) == 1 and app.status == 'submitted'
+    assert 'candidate@example.com' in body_text(Handler.posts[0])
+
+
+def test_pausing_automatic_submission_while_browser_open_prevents_click(db, job_factory, cv, server, monkeypatch):
+    from app import automation
+    from app.core import set_setting
+    from app.models import Profile
+    job, app = make_app(db, job_factory, server, 'lever')
+    app.automation_mode = 'automatic'
+    profile = preparation.load_profile(db)
+    profile.application_policy.require_final_approval = False
+    db.get(Profile, 1).data = profile.model_dump()
+    set_setting(db, 'automation', {'auto_fill_enabled': True, 'auto_submit_enabled': True})
+    db.commit()
+    assert workflow.fill_application(db, app.id, automatic=True)['ok']
+    real_shot = automation._save_shot
+    def pause(db, app, page, kind):
+        shot = real_shot(db, app, page, kind)
+        if kind == 'pre_submit':
+            set_setting(db, 'automation', {'auto_fill_enabled': True, 'auto_submit_enabled': False})
+            db.commit()
+        return shot
+    monkeypatch.setattr(automation, '_save_shot', pause)
+    assert not workflow.submit_application(db, app.id, app.submit_key, automatic=True)['ok']
+    assert Handler.posts == [] and app.status == 'failed'

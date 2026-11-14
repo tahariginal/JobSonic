@@ -43,6 +43,9 @@ export default function ProfilePage() {
       <PageHeader title="Candidate profile" subtitle="Your profile and saved answers are used to fill applications. Keep your details, preferred start date, and reusable answers up to date here." />
       {data?.gaps?.length > 0 && <div className="mb-5"><Callout tone="warn" title="Still missing">{data.gaps.join(" · ")}</Callout></div>}
       <Tabs value={tab} onChange={setTab} items={TABS as any} />
+      {p.application_policy?.needs_attention?.length > 0 && <div className="mt-4"><Callout tone="warn" title="Unconfirmed profile details">
+        {p.application_policy.needs_attention.join(" · ")}. Required questions about these stay in Needs attention while other applications continue.
+      </Callout></div>}
 
       <div className="mt-5 space-y-4">
         {tab === "personal" && (<>
@@ -54,6 +57,7 @@ export default function ProfilePage() {
           </div></Card>
           <Card className="p-5"><h2 className="mb-3 text-[13px] font-semibold">Links</h2><div className="grid gap-4 sm:grid-cols-2">
             {txt("links.linkedin", "LinkedIn", { placeholder: "https://www.linkedin.com/in/…" })}{txt("links.github", "GitHub")}{txt("links.portfolio", "Portfolio")}
+            <StrList label="Other links (X / Twitter, etc.)" values={p.links.other ?? []} onChange={(v) => up("links.other", v)} placeholder="https://x.com/…" />
             <StrList label="Email accounts you apply from" values={p.email_accounts} onChange={(v) => up("email_accounts", v)} placeholder="name@example.com" />
           </div></Card>
           <Rows title="Languages" hint="Only languages listed here count as confirmed when a job requires one." items={p.languages} onChange={(v) => up("languages", v)} blank={{ language: "", level: "" }} fields={[["language", "Language"], ["level", "Level (e.g. native, fluent, B2)"]]} />
@@ -87,8 +91,9 @@ export default function ProfilePage() {
             <StrList label="Target roles" values={p.preferences.target_roles} onChange={(v) => up("preferences.target_roles", v)} placeholder="Role title" chips />
             <StrList label="Preferred countries" hint="Leave empty to use the default regional priorities." values={p.preferences.countries} onChange={(v) => up("preferences.countries", v)} placeholder="Country" chips />
             <div className="grid gap-4 sm:grid-cols-3">
-              <div><Label htmlFor="sal">Minimum salary (yearly)</Label><Input id="sal" type="number" min={0} value={p.preferences.salary_min ?? ""} onChange={(e) => up("preferences.salary_min", e.target.value === "" ? null : Number(e.target.value))} /></div>
+              <div><Label htmlFor="sal">Minimum salary</Label><Input id="sal" type="number" min={0} value={p.preferences.salary_min ?? ""} onChange={(e) => up("preferences.salary_min", e.target.value === "" ? null : Number(e.target.value))} /></div>
               {txt("preferences.salary_currency", "Currency", { placeholder: "EUR" })}
+              <div><Label htmlFor="salary-period" hint="No numerical salary answers until confirmed">Salary period</Label><select id="salary-period" className="h-10 w-full rounded-lg border border-line bg-raised px-3 text-sm" value={p.preferences.salary_period ?? ""} onChange={(e) => up("preferences.salary_period", e.target.value)}><option value="">Not confirmed</option><option value="month">Monthly</option><option value="year">Yearly</option></select></div>
               <div><Label htmlFor="yrs" hint="jobs asking more are filtered">Max years required</Label><Input id="yrs" type="number" min={0} max={10} step={0.5} value={p.preferences.max_years_experience} onChange={(e) => up("preferences.max_years_experience", Number(e.target.value))} /></div>
               <div><Label htmlFor="start" hint="your wish, not visa timing">Earliest start date</Label><Input id="start" type="date" value={p.preferences.earliest_start_date} onChange={(e) => up("preferences.earliest_start_date", e.target.value)} /></div>
               <div className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5"><span className="text-[13px]">Open to relocation</span><Toggle label="Open to relocation" checked={p.preferences.open_to_relocation} onChange={(v) => up("preferences.open_to_relocation", v)} /></div>
@@ -104,7 +109,7 @@ export default function ProfilePage() {
             <div><Label htmlFor="motivation">Why this company?</Label><Textarea id="motivation" rows={5} value={p.preferences.motivation_answer ?? ""} onChange={(e) => up("preferences.motivation_answer", e.target.value)} /></div>
             <p className="text-xs text-ink-3">Start-date questions use your earliest start date in Work authorization & preferences. Saving your profile also fills answerable gaps in applications awaiting your input.</p>
           </Card>
-          <Rows title="Standard application answers" hint="When a form asks a similar question, your saved answer is used word for word." items={p.standard_answers} onChange={(v) => up("standard_answers", v)} blank={{ question: "", answer: "" }}
+          <Rows title="Standard application answers" hint="Saved answers are reused on matching questions. Consent choices require the exact question text so one agreement is never applied to a different agreement." items={p.standard_answers} onChange={(v) => up("standard_answers", v)} blank={{ question: "", answer: "" }}
             fields={[["question", "Question (e.g. How did you hear about us?)"], ["answer", "Your answer", "area"]]} wide />
         </>}
 

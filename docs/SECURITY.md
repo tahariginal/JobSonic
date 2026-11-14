@@ -24,13 +24,17 @@ The system stores your CV, contact details, application history and (optionally)
 
 ## Application safety rules (enforced in code and tests)
 
-- Nothing is submitted without your approval of the exact version (job + CV + every answer).
+- Submission requires authorization of the exact version (job + CV + every answer), either your
+  individual approval or your explicitly enabled automatic-submission policy for an automatic application.
+- Automatic submission uses saved answers and factual templates, checks live eligibility, and re-checks
+  the enabled policy immediately before sending. Manual applications still require individual approval.
 - Any change after approval cancels it.
 - One approval can drive at most one submission; duplicates are blocked in the database transaction.
 - An interrupted or unconfirmed submission is flagged for a manual check and never retried.
 - CAPTCHA, login walls and human checks are detected and handed to you. They are never bypassed.
 - No email is ever sent or replied to: the Gmail scope makes that impossible.
-- Consent / privacy checkboxes are never ticked for you; you tick them during review.
+- Consent / privacy choices require your manual answer or a saved answer to the exact same question.
+  A similar question never supplies consent for a different agreement.
 - Voluntary demographic questions get the "decline" option or are left empty.
 
 ## Known limits and things to decide

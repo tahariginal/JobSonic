@@ -76,8 +76,15 @@ export default function ApplicationPage() {
 
       {/* state panel */}
       <div className="mt-5 space-y-3">
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div><p className="text-[13px] font-medium">Application mode</p><p className="text-xs text-ink-3">Automatic applications use your saved settings. Manual applications wait for your review.</p></div>
+          <Select aria-label="Application mode" className="w-44" value={a.automation_mode ?? "manual"} disabled={LOCKED.includes(a.status) || a.status === "declined" || !!busy || dirty}
+            onChange={(e) => run("mode", () => api(`/applications/${a.id}/mode`, { method: "PUT", body: { mode: e.target.value } }), "Application mode saved.")}>
+            <option value="automatic">Automatic</option><option value="manual">Manual</option>
+          </Select>
+        </Card>
         {a.status === "submitted" && (
-          <Callout tone="info" title={`Submitted ${fmtDate(a.submitted_at)} ${a.submitted_via === "manual" ? "(marked manually by you)" : "by the agent after your approval"}`}>
+          <Callout tone="info" title={`Submitted ${fmtDate(a.submitted_at)} ${a.submitted_via === "manual" ? "(marked manually by you)" : a.automation_mode === "automatic" ? "by the automatic application cycle" : "by the agent after your approval"}`}>
             {a.confirmation?.confirmation_text && <>Confirmation shown by the site: “{a.confirmation.confirmation_text}”. </>}
             {a.confirmation?.email ? <>Confirmation email received: “{a.confirmation.email.subject}”.</> : "No confirmation email matched yet."}
           </Callout>
@@ -95,13 +102,13 @@ export default function ApplicationPage() {
         {a.status === "failed" && <Callout tone="bad" title="Submission failed before anything was sent">{a.last_error} The approval was cancelled. Fill the form again and re-approve.</Callout>}
         {a.status === "prepared" && a.last_error && <Callout tone="warn" title="The last form attempt did not complete">{a.last_error}</Callout>}
         {blocking.length > 0 && !locked && (
-          <Callout tone="warn" title={`${blocking.length} item${blocking.length > 1 ? "s" : ""} need your input before this can go for approval`}>
+          <Callout tone="warn" title={`${blocking.length} item${blocking.length > 1 ? "s" : ""} need your input before this can proceed`}>
             <ul className="mt-1 list-disc space-y-0.5 pl-4">{blocking.map((i: any, k: number) => <li key={k}>{i.text}{i.code === "profile_gap" || i.code === "no_cv" ? <> <Link href="/profile/" className="text-accent hover:underline">Open profile</Link></> : null}</li>)}</ul>
           </Callout>
         )}
         {["prepared", "changes_requested", "failed", "needs_manual"].includes(a.status) && blocking.length === 0 && !dirty && (
-          <Callout title="Ready to fill the official form" action={<Button variant="primary" loading={busy === "fill"} icon={<MousePointerClick className="size-4" />} onClick={() => run("fill", () => api(`/applications/${a.id}/fill`, { method: "POST" }), "Opening the form in the background…")}>Fill form for review</Button>}>
-            The agent opens the employer's form, enters these answers, takes a screenshot and stops. It does not submit.
+          <Callout title="Ready to fill the official form" action={<Button variant="primary" loading={busy === "fill"} icon={<MousePointerClick className="size-4" />} onClick={() => run("fill", () => api(`/applications/${a.id}/fill`, { method: "POST" }), "Opening the form in the background…")}>{a.automation_mode === "automatic" ? "Continue automatically" : "Fill form for review"}</Button>}>
+            {a.automation_mode === "automatic" ? "The agent fills the form using these answers and follows your automatic submission setting." : "The agent opens the employer's form, enters these answers, takes a screenshot and stops for your review."}
           </Callout>
         )}
       </div>

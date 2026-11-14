@@ -1,4 +1,4 @@
-"""Orchestration of the two browser workflows: fill-for-review and approved submit."""
+"""Fill forms and submit under individual approval or the saved automatic policy."""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
@@ -13,7 +13,7 @@ LOCKED = ("submitted", "submitting", "submit_uncertain", "approved")
 
 
 def fill_application(db: Session, application_id: int, *, runner=None, automatic: bool = False) -> dict:
-    """Open the real form, fill it, screenshot it and queue it for approval. Never submits."""
+    """Fill and screenshot the form; queue review or authorized automatic submission."""
     runner = runner or automation.run_form
     app = db.get(Application, application_id)
     if app is None:
@@ -46,7 +46,12 @@ def fill_application(db: Session, application_id: int, *, runner=None, automatic
     db.commit()
     res = {}
     for attempt in (1, 2):
+        revision, content_hash = app.revision, app.content_hash
         res = runner(db, app, "fill", timeout_s=timeout)
+        db.refresh(app)
+        if (app.revision != revision or app.content_hash != content_hash or app.status in LOCKED
+                or (automatic and app.automation_mode != "automatic")):
+            return {"ok": False, "error": "Application changed while the form was being filled; this attempt was stopped."}
         known = {a["key"] for a in app.answers or []}
         added = []
         for d in res.get("discovered") or []:
@@ -82,10 +87,15 @@ def fill_application(db: Session, application_id: int, *, runner=None, automatic
         app.status = "awaiting_approval"
         app.last_error = ""
         job.stage = "awaiting_approval"
-        emit(db, "form.filled", f"Form filled and waiting for your approval: {name} ({len(res.get('filled', []))} fields).",
-             job_id=job.id, application_id=app.id)
-        notify(db, "awaiting_approval", f"Review & approve: {job.title}", f"{job.company.name} — the filled form is ready for your review.",
-               dedupe_key=f"approve:{app.id}:{app.revision}", job_id=job.id, application_id=app.id)
+        if automatic and not pipeline.automatic_submission_reason(db, app):
+            pipeline.approve(db, app, app.revision, app.content_hash, automatic=True)
+            emit(db, "form.filled", f"Form filled and queued for automatic submission: {name} ({len(res.get('filled', []))} fields).",
+                 job_id=job.id, application_id=app.id)
+        else:
+            emit(db, "form.filled", f"Form filled and waiting for your approval: {name} ({len(res.get('filled', []))} fields).",
+                 job_id=job.id, application_id=app.id)
+            notify(db, "awaiting_approval", f"Review & approve: {job.title}", f"{job.company.name} — the filled form is ready for your review.",
+                   dedupe_key=f"approve:{app.id}:{app.revision}", job_id=job.id, application_id=app.id)
     else:
         app.status = "prepared"
         app.last_error = res.get("error", "") or (f"{len(blocking)} form item(s) need your input." if blocking else "")
@@ -93,12 +103,23 @@ def fill_application(db: Session, application_id: int, *, runner=None, automatic
         notify(db, "form_error", f"Form needs attention: {job.title}", app.last_error,
                dedupe_key=f"formerr:{app.id}:{app.revision}", job_id=job.id, application_id=app.id)
     db.commit()
-    return {"ok": app.status == "awaiting_approval", "status": app.status, "report": res}
+    return {"ok": app.status in ("awaiting_approval", "approved"), "status": app.status, "report": res}
 
 
-def submit_application(db: Session, application_id: int, submit_key: str, *, runner=None) -> dict:
+def submit_application(db: Session, application_id: int, submit_key: str, *, runner=None, automatic: bool = False) -> dict:
     """Submit an approved application exactly once."""
     runner = runner or automation.run_form
+    if automatic:
+        candidate = db.get(Application, application_id)
+        if candidate is None or candidate.status != "approved" or candidate.submit_key != submit_key:
+            return {"ok": False, "error": "Automatic submission is no longer authorized."}
+        reason = pipeline.automatic_submission_reason(db, candidate)
+        if reason:
+            pipeline.invalidate_approval(db, candidate, reason)
+            candidate.status = "awaiting_approval"
+            candidate.last_error = reason
+            db.commit()
+            return {"ok": False, "error": reason}
     app = pipeline.begin_submit(db, application_id, submit_key)
     if app is None:
         return {"ok": False, "error": "submission not authorised for the current version"}
@@ -108,12 +129,16 @@ def submit_application(db: Session, application_id: int, submit_key: str, *, run
     try:
         live = verify_job(db, job)
         db.commit()
-        if live is False:
-            pipeline.finish_submit(db, app, "failed_before_send", error="The vacancy closed before submission.")
-            return {"ok": False, "error": "vacancy closed"}
+        if live is False or (automatic and (live is not True or app.job.eligibility != "eligible")):
+            reason = "The vacancy closed before submission." if live is False else "Vacancy availability or eligibility could not be verified."
+            pipeline.finish_submit(db, app, "failed_before_send", error=reason)
+            return {"ok": False, "error": reason}
         expected = {x["key"] for x in (app.fill_report or {}).get("filled", [])}
         timeout = int(get_setting(db, "automation").get("max_form_seconds", 120)) + 60
-        res = runner(db, app, "submit", timeout_s=timeout, expect_filled=expected)
+        kwargs = {"timeout_s": timeout, "expect_filled": expected}
+        if automatic:
+            kwargs["automatic"] = True
+        res = runner(db, app, "submit", **kwargs)
     except Exception as e:  # the runner itself reports click state; anything escaping it happened before a click
         pipeline.finish_submit(db, app, "failed_before_send", error=f"{type(e).__name__}: {e}")
         return {"ok": False, "error": str(e)}
