@@ -24,7 +24,7 @@ reasoning is needed.
 
 | Area | State |
 |---|---|
-| Discovery from Greenhouse, Lever, Ashby (165 verified employer boards) | Working, runs every 12 h |
+| Discovery from Greenhouse, Lever, Ashby (165 verified employer boards) | Working, configurable search interval |
 | Dedupe, change detection, closed-vacancy detection | Working |
 | Eligibility filter, Needs Review queue, visa evidence with quotes | Working (rules, no AI) |
 | Fit rating 1–5 with explanation | Working (rules); AI refinement optional |
@@ -56,6 +56,16 @@ Details and limits for each item: `docs/ROADMAP.md`.
    form progress, approval/submission status, and dates. Search by company or role, filter by status,
    and open the saved application to review its answers, screenshots, and history. **Pipeline**,
    **Activity** and **Analytics** provide the wider view.
+
+For a recurring search-to-fill cycle, use **Settings → Search & schedule**: enable automatic job
+search, choose the interval (for example, **4 hours**), and enable **Automatically fill applications**.
+Each full search queues up to the configured number of new eligible applications (default 20),
+prioritizing confirmed visa sponsorship, then remote roles, then other eligible matches if enabled.
+Only jobs freshly verified on enabled official boards are selected. Existing applications and
+archived jobs are skipped; unresolved questions and failed attempts remain in the tracker for review.
+Forms are re-verified before filling and always stop for approval before submission. The worker
+runs this cycle even when the dashboard is closed. Pause automatic filling in Settings to stop
+queued automatic preparation/filling tasks from proceeding.
 
 ## Service control
 

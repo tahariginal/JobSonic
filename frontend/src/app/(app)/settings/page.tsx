@@ -98,6 +98,13 @@ function Schedule({ s, patch }: any) {
       <Row title="Run a search now" desc="Queues one full search immediately."><Button variant="primary" loading={searching} icon={<Search className="size-4" />} onClick={runSearch}>Run job search</Button></Row>
     </Card>
     <Card className="p-5">
+      <h2 className="mb-4 text-[13px] font-semibold">Search → prepare → fill → track</h2>
+      <Row title="Automatically fill applications after each full search" desc="Confirmed visa sponsorship first, then remote roles, ranked by fit. Only active jobs marked eligible are selected. Each job is attempted once; forms wait for your approval before submission."><Toggle label="Automatically fill applications" checked={s.automation.auto_fill_enabled} onChange={(v) => patch("automation", { auto_fill_enabled: v })} /></Row>
+      <Row title="Include other suitable jobs after priority matches" desc="Other eligible roles can fill the remaining places in each cycle."><Toggle label="Include other suitable jobs" checked={s.automation.include_other_matches} onChange={(v) => patch("automation", { include_other_matches: v })} /></Row>
+      <Row title="Applications per cycle" desc="Maximum new applications prepared and filled after each search. Existing, previously attempted, and archived applications are skipped."><Num label="Applications per cycle" value={s.automation.max_applications_per_cycle} min={1} max={100} onCommit={(v) => patch("automation", { max_applications_per_cycle: v })} /></Row>
+      <p className="mt-4 text-xs text-ink-3">Follow queued work, filled forms, and questions that need your input in Application tracker. Pausing automatic filling also stops queued automatic applications from opening forms.</p>
+    </Card>
+    <Card className="p-5">
       <h2 className="text-[13px] font-semibold">Title matching</h2>
       <p className="mt-0.5 text-xs text-ink-3">Engineering titles matching your target roles are kept automatically. Add keywords to widen or narrow that.</p>
       <div className="mt-4 grid gap-5 sm:grid-cols-2">

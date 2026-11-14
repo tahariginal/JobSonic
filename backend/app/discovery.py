@@ -213,6 +213,7 @@ def notify_new_jobs(db: Session, job_ids: list[int]) -> int:
 
 def run_discovery(db: Session, company_ids: Optional[list[int]] = None, client: Optional[PoliteClient] = None,
                   trigger: str = "schedule") -> dict:
+    started_at = utcnow().isoformat() + "Z"
     profile = load_profile(db)
     search_cfg = get_setting(db, "search")
     q = select(Company).where(Company.enabled.is_(True))
@@ -256,7 +257,7 @@ def run_discovery(db: Session, company_ids: Optional[list[int]] = None, client: 
          + (f", {totals['errors']} source errors" if totals["errors"] else "") + ".",
          level="warn" if totals["errors"] else "info", data={**totals, "alerts": alerts})
     runs = get_setting(db, "last_runs") or {}
-    runs["discovery"] = {"at": utcnow().isoformat() + "Z", **totals}
+    runs["discovery"] = {"at": utcnow().isoformat() + "Z", "started_at": started_at, **totals}
     set_setting(db, "last_runs", runs)
     db.commit()
     totals["new_ids"] = new_ids

@@ -261,6 +261,34 @@ def test_settings_validation_and_secrets_never_returned(client):
     assert s["ai_status"]["available"] is False and s["ai"]["enabled"] is False  # AI is off by default
 
 
+def test_automatic_cycle_settings_and_live_tracker_progress(client, job_factory, cv, db):
+    from datetime import timedelta
+    from app.core import enqueue, set_setting
+    from app.db import utcnow
+    from app.preparation import prepare_application
+
+    assert client.get("/api/settings").json()["automation"]["auto_fill_enabled"] is False
+    result = client.put("/api/settings", json={"schedule": {"discovery_enabled": True, "discovery_interval_hours": 4},
+                        "automation": {"auto_fill_enabled": True, "max_applications_per_cycle": 20, "include_other_matches": True}})
+    assert result.status_code == 200
+    for invalid in (0, 101, 1.5):
+        assert client.put("/api/settings", json={"automation": {"max_applications_per_cycle": invalid}}).status_code == 400
+    assert client.put("/api/settings", json={"automation": {"auto_fill_enabled": "false"}}).status_code == 400
+    a = prepare_application(db, job_factory(), use_ai=False)
+    enqueue(db, "fill_form", {"application_id": a.id, "automatic": True})
+    started = utcnow() - timedelta(hours=1)
+    set_setting(db, "last_runs", {"discovery": {"started_at": started.isoformat() + "Z"},
+                                  "autofill": {"queued": 1, "visa_confirmed": 1, "remote": 0, "other": 0}})
+    db.commit()
+    tracker = client.get("/api/application-tracker").json()
+    assert tracker["items"][0]["active_task"] == {"type": "fill_form", "status": "queued"}
+    assert tracker["automation"]["enabled"] is True and tracker["automation"]["interval_hours"] == 4
+    assert tracker["automation"]["applications_active"] == 1 and tracker["automation"]["last_cycle"]["queued"] == 1
+    assert tracker["automation"]["next_search_at"] == (started + timedelta(hours=4)).isoformat() + "Z"
+    assert client.put("/api/settings", json={"automation": {"auto_fill_enabled": False}}).status_code == 200
+    assert client.get("/api/application-tracker").json()["automation"]["enabled"] is False
+
+
 def test_overview_and_analytics_report_only_real_data(client, job_factory):
     o = client.get("/api/overview").json()
     assert o["metrics"]["jobs_discovered"] == 0 and o["metrics"]["response_rate"] is None and o["recent_activity"] == []

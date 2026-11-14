@@ -42,6 +42,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "automation": {
         "max_form_seconds": 120,
+        "auto_fill_enabled": False,
+        "max_applications_per_cycle": 20,
+        "include_other_matches": True,
     },
     "last_runs": {},
 }

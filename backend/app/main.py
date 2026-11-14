@@ -6,7 +6,7 @@ import logging
 import re
 import secrets
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -632,6 +632,20 @@ def list_applications(status: str = "", db: Session = Depends(get_db)):
 @api.get("/application-tracker")
 def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge=0),
                         limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)):
+    active_tasks = list(db.scalars(select(Task).where(Task.type.in_(("discovery", "prepare_application", "fill_form")),
+                                                     Task.status.in_(("queued", "running"))).order_by(Task.id)))
+    work = {(t.payload or {}).get("application_id"): {"type": t.type, "status": t.status} for t in active_tasks
+            if (t.payload or {}).get("application_id")}
+    cfg, schedule = get_setting(db, "automation"), get_setting(db, "schedule")
+    runs = get_setting(db, "last_runs") or {}
+    last_search = runs.get("discovery") or {}
+    next_search_at = None
+    try:
+        last_start = last_search.get("started_at") or last_search.get("at")
+        if last_start:
+            next_search_at = iso(datetime.fromisoformat(last_start.rstrip("Z")) + timedelta(hours=max(1, float(schedule["discovery_interval_hours"]))))
+    except (ValueError, TypeError):
+        pass
     counts = dict(db.execute(select(Application.status, func.count(Application.id)).group_by(Application.status)).all())
     companies = db.scalar(select(func.count(func.distinct(Job.company_id))).join(Application, Application.job_id == Job.id)) or 0
     stmt = select(Application).join(Job, Application.job_id == Job.id).join(Company, Job.company_id == Company.id)
@@ -646,6 +660,7 @@ def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge
         items.append({
             "id": a.id, "company": j.company.name, "title": j.title, "location": j.location_raw,
             "status": a.status, "stage": j.stage, "created_at": iso(a.created_at), "updated_at": iso(a.updated_at),
+            "active_task": work.get(a.id), "visa_status": j.visa_status, "remote_mode": j.remote_mode,
             "submitted_at": iso(a.submitted_at), "submitted_via": a.submitted_via,
             "last_error": a.last_error, "blocking_issues": len(pipeline.blocking_issues(a)),
             "form_attempted_at": report.get("finished_at"), "form_outcome": report.get("outcome"),
@@ -653,7 +668,12 @@ def application_tracker(q: str = "", status: str = "", offset: int = Query(0, ge
             "fill_is_current": bool(report) and report.get("revision") == a.revision and report.get("content_hash") == a.content_hash,
         })
     return {"items": items, "total": total, "summary": {"companies": companies, "applications": sum(counts.values()),
-            "awaiting_approval": counts.get("awaiting_approval", 0), "submitted": counts.get("submitted", 0)}, "statuses": counts}
+            "awaiting_approval": counts.get("awaiting_approval", 0), "submitted": counts.get("submitted", 0)}, "statuses": counts,
+            "automation": {"enabled": bool(cfg["auto_fill_enabled"] and schedule["discovery_enabled"]),
+                           "interval_hours": schedule["discovery_interval_hours"], "max_applications": cfg["max_applications_per_cycle"],
+                           "include_other_matches": cfg["include_other_matches"], "next_search_at": next_search_at,
+                           "search_active": any(t.type == "discovery" for t in active_tasks),
+                           "applications_active": sum(t.type != "discovery" for t in active_tasks), "last_cycle": runs.get("autofill")}}
 
 
 @api.get("/approvals")
@@ -1080,6 +1100,8 @@ def _clean(key: str, incoming: dict) -> dict:
             continue
         v = incoming[k]
         if isinstance(default, bool):
+            if key == "automation" and k in ("auto_fill_enabled", "include_other_matches") and not isinstance(v, bool):
+                raise HTTPException(400, f"{key}.{k} must be true or false")
             out[k] = bool(v)
         elif isinstance(default, (int, float)):
             try:
@@ -1088,6 +1110,8 @@ def _clean(key: str, incoming: dict) -> dict:
                 raise HTTPException(400, f"{key}.{k} must be a number")
             if num < 0 or num > 100000:
                 raise HTTPException(400, f"{key}.{k} is out of range")
+            if key == "automation" and k == "max_applications_per_cycle" and (not 1 <= num <= 100 or not num.is_integer()):
+                raise HTTPException(400, "Applications per cycle must be a whole number between 1 and 100")
             out[k] = int(num) if isinstance(default, int) else num
         elif isinstance(default, list):
             if not isinstance(v, list):

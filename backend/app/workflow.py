@@ -12,7 +12,7 @@ from .preparation import collect_issues, refresh_profile_answers, resolve_answer
 LOCKED = ("submitted", "submitting", "submit_uncertain", "approved")
 
 
-def fill_application(db: Session, application_id: int, *, runner=None) -> dict:
+def fill_application(db: Session, application_id: int, *, runner=None, automatic: bool = False) -> dict:
     """Open the real form, fill it, screenshot it and queue it for approval. Never submits."""
     runner = runner or automation.run_form
     app = db.get(Application, application_id)
@@ -24,9 +24,10 @@ def fill_application(db: Session, application_id: int, *, runner=None) -> dict:
     name = f"{job.company.name} — {job.title}"
     live = verify_job(db, job)
     db.commit()
-    if live is False:
+    if live is False or (automatic and (live is not True or job.eligibility != "eligible")):
         app.status = "prepared"
-        app.last_error = "The vacancy is no longer listed on the official source."
+        app.last_error = ("The vacancy is no longer listed on the official source." if live is False
+                          else "Automatic filling paused: vacancy availability or eligibility needs review.")
         emit(db, "form.failed", f"Form not opened, vacancy closed: {name}.", level="warn", job_id=job.id, application_id=app.id)
         db.commit()
         return {"ok": False, "error": app.last_error}
